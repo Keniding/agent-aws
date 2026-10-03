@@ -37,7 +37,7 @@ def up():
     spec = {
         "executionRoleArn": os.environ["HARNESS_ROLE_ARN"],
         "model": {"bedrockModelConfig": {"modelId": os.environ["MODEL_ID"]}},
-        "systemPrompt": [{"text": "Eres un asistente breve y útil. Responde en español."}],
+        "systemPrompt": [{"text": "Eres el asistente de un sistema de incidencias de TI. Clasificas severidad, propones próximos pasos y respondes dudas sobre las incidencias abiertas que se te indiquen. Sé breve y concreto; responde en español."}],
         "maxIterations": 10,
         "timeoutSeconds": 100,
     }

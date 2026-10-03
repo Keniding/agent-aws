@@ -9,8 +9,8 @@ permissions:
   contents: read
 env:
   AWS_REGION: ${{ vars.AWS_REGION }}
-  STACK: agent-aws-demo
-  HARNESS_NAME: agent_aws_demo
+  STACK: incidencias
+  HARNESS_NAME: asistente_incidencias
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -38,7 +38,7 @@ jobs:
           aws cloudformation deploy --stack-name "$STACK" --template-file template.yaml \
             --capabilities CAPABILITY_IAM --no-fail-on-empty-changeset \
             --parameter-overrides LambdaRuntime="$(cat build/runtime.txt)" \
-              ModelId="${{ vars.MODEL_ID }}" HarnessName="$HARNESS_NAME" \
+              HarnessName="$HARNESS_NAME" \
               CodeBucket="$BUCKET" CodeKey="$KEY"
       - name: Create/update harness
         run: |

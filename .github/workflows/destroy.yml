@@ -16,7 +16,7 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
       - run: uv sync --frozen
-      - run: HARNESS_NAME=agent_aws_demo uv run scripts/harness.py down
+      - run: HARNESS_NAME=asistente_incidencias uv run scripts/harness.py down
       - run: |
-          aws cloudformation delete-stack --stack-name agent-aws-demo
-          aws cloudformation wait stack-delete-complete --stack-name agent-aws-demo
+          aws cloudformation delete-stack --stack-name incidencias
+          aws cloudformation wait stack-delete-complete --stack-name incidencias

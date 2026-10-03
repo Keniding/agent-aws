@@ -1,7 +1,7 @@
 [project]
 name = "agent-aws"
 version = "0.1.0"
-description = "Demo: web + Lambda (pay-per-use) -> AgentCore harness (pay-per-use)"
+description = "Sistema de incidencias: web + Lambda + DynamoDB + harness de AgentCore"
 readme = "README.md"
 # InvokeHarness / CreateHarness only exist in recent boto3; the Lambda runtime's
 # bundled boto3 may be older, so we always vendor boto3 into the package.

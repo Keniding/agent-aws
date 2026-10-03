@@ -1,22 +1,48 @@
 <!doctype html>
 <html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Agent demo</title>
+<title>Incidencias</title>
 <style>
-body{font:16px system-ui;max-width:42rem;margin:2rem auto;padding:0 1rem}
-#log{border:1px solid #8885;border-radius:8px;padding:1rem;min-height:12rem;white-space:pre-wrap}
-form{display:flex;gap:.5rem;margin-top:1rem}input{flex:1;padding:.6rem}button{padding:.6rem 1rem}
-.u{font-weight:600}.e{color:#b00}
+:root{color-scheme:light dark}
+body{font:15px system-ui;max-width:60rem;margin:1.5rem auto;padding:0 1rem;display:grid;gap:1.5rem}
+@media(min-width:800px){body{grid-template-columns:3fr 2fr}h1,form#n{grid-column:1}}
+h1{grid-column:1/-1;margin:0}
+section,form{border:1px solid #8886;border-radius:8px;padding:1rem}
+input,textarea,button,select{font:inherit;padding:.5rem;width:100%;box-sizing:border-box;margin:.25rem 0}
+button{width:auto;cursor:pointer}
+.inc{border-top:1px solid #8884;padding:.6rem 0}.inc:first-child{border:0}
+.sev{font-size:.75rem;padding:.1rem .45rem;border-radius:99px;background:#8883;text-transform:uppercase}
+.critica{background:#c33;color:#fff}.alta{background:#e83;color:#000}
+.muted{opacity:.7}.resuelta .t{text-decoration:line-through;opacity:.6}
+#log{min-height:8rem;white-space:pre-wrap}.e{color:#c33}
 </style></head><body>
-<h1>AgentCore harness demo</h1><div id="log"></div>
-<form id="f"><input id="m" autocomplete="off" placeholder="Escribe un mensaje" required><button>Enviar</button></form>
+<h1>Incidencias</h1>
+<div>
+ <form id="n"><strong>Nueva incidencia</strong>
+  <input id="t" placeholder="Título" maxlength="200" required>
+  <textarea id="d" rows="3" placeholder="¿Qué ocurre? Impacto, sistema afectado…"></textarea>
+  <button>Registrar y clasificar</button> <span id="ns" class="muted"></span></form>
+ <section id="list"></section>
+</div>
+<section><strong>Asistente</strong><div id="log"></div>
+ <form id="c" style="border:0;padding:0"><input id="m" placeholder="Pregunta sobre las incidencias abiertas" required><button>Enviar</button></form></section>
 <script>
-let sid=localStorage.sid||null;const log=document.getElementById('log');
-function add(c,t){const d=document.createElement('div');d.className=c;d.textContent=t;log.append(d);return d}
-document.getElementById('f').onsubmit=async e=>{e.preventDefault();
- const m=document.getElementById('m');const text=m.value;m.value='';add('u','Tú: '+text);
- const w=add('','…');
- try{const r=await fetch('',{method:'POST',headers:{'content-type':'application/json'},
-  body:JSON.stringify({message:text,session_id:sid})});const j=await r.json();
-  if(!r.ok)throw new Error(j.error);sid=localStorage.sid=j.session_id;w.textContent='Agente: '+j.reply}
- catch(err){w.className='e';w.textContent='Error: '+err.message}};
+const $=id=>document.getElementById(id);let sid=null;try{sid=localStorage.sid}catch{}
+const api=async(p,o)=>{const r=await fetch(p,o&&{method:o.m,headers:{'content-type':'application/json'},body:JSON.stringify(o.b)});
+ const j=await r.json();if(!r.ok)throw new Error(j.error);return j};
+function el(tag,cls,txt){const e=document.createElement(tag);if(cls)e.className=cls;if(txt!=null)e.textContent=txt;return e}
+async function load(){const items=await api('/api/incidents');$('list').replaceChildren(
+ ...(items.length?items.map(i=>{const d=el('div','inc '+i.status);
+  const h=el('div');h.append(el('span','sev '+i.severity,i.severity),' ',el('b','t',i.title));d.append(h);
+  if(i.summary)d.append(el('div','muted',i.summary));
+  (i.next_steps||[]).forEach(s=>d.append(el('div','muted','→ '+s)));
+  const s=el('select');['abierta','en_curso','resuelta'].forEach(v=>{const o=el('option',null,v);o.selected=v===i.status;s.append(o)});
+  s.onchange=async()=>{await api('/api/incidents/'+i.id,{m:'PATCH',b:{status:s.value}});load()};d.append(s);return d}):[el('div','muted','Sin incidencias.')]))}
+$('n').onsubmit=async e=>{e.preventDefault();$('ns').textContent='clasificando…';
+ try{await api('/api/incidents',{m:'POST',b:{title:$('t').value,description:$('d').value}});$('n').reset();$('ns').textContent='';load()}
+ catch(x){$('ns').textContent=x.message}};
+$('c').onsubmit=async e=>{e.preventDefault();const q=$('m').value;$('m').value='';
+ $('log').append(el('div','muted','Tú: '+q));const w=el('div',null,'…');$('log').append(w);
+ try{const j=await api('/api/chat',{m:'POST',b:{message:q,session_id:sid}});sid=j.session_id;try{localStorage.sid=sid}catch{}w.textContent=j.reply}
+ catch(x){w.className='e';w.textContent='Error: '+x.message}};
+load();
 </script></body></html>

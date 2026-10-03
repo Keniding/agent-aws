@@ -1,33 +1,42 @@
-# agent-aws — demo AgentCore harness + Lambda + web (todo pay-per-use)
+# Sistema de incidencias (AgentCore + Lambda + web)
+
+Registro y seguimiento de incidencias con un asistente de IA que clasifica cada una (severidad, categoría,
+resumen, próximos pasos) y responde dudas sobre las abiertas.
 
 ```
-Browser ──► Lambda Function URL (sirve la web y /POST chat) ──► AgentCore harness (InvokeHarness) ──► Bedrock
+Navegador ──► Lambda (Function URL: web + API) ──► DynamoDB (bajo demanda)
+                         └──► AgentCore harness (InvokeHarness) ──► Bedrock
 ```
-Sin servidores fijos: Lambda, el harness de AgentCore y Bedrock cobran por uso (el harness no tiene cargo
-adicional; se paga runtime/memoria/etc. consumidos). Nada cuesta si nadie lo usa, salvo el bucket S3 con el zip.
+Todo se paga por uso: Lambda, DynamoDB on-demand, harness de AgentCore (sin cargo propio; se factura el
+runtime/memoria consumidos) y Bedrock. Sin tráfico no hay coste, salvo el bucket S3 con el zip.
+
+## API
+| Método y ruta | Qué hace |
+|---|---|
+| `GET /` | web |
+| `GET /api/incidents` | lista (más recientes primero) |
+| `POST /api/incidents` `{title, description}` | crea y clasifica con el asistente (si falla, se guarda igualmente) |
+| `PATCH /api/incidents/{id}` `{status}` | `abierta` · `en_curso` · `resuelta` |
+| `POST /api/chat` `{message, session_id?}` | pregunta al asistente con las incidencias abiertas como contexto |
 
 ## Versiones
-Ninguna fijada a mano: `uv.lock` las resuelve (boto3 se empaqueta dentro del zip porque el de Lambda puede
-no traer `InvokeHarness`), y el runtime de Lambda se deduce del Python que usa uv (`build/runtime.txt`).
-Las actions de GitHub usan los últimos tags existentes al crear el repo.
+Ninguna fijada a mano: `uv.lock` las resuelve (boto3 va dentro del zip porque el de Lambda puede no traer
+`InvokeHarness`) y el runtime de Lambda se deduce del Python de uv (`build/runtime.txt`). Las actions de
+GitHub usan los últimos tags existentes al crear el repo.
 
-## Requisitos únicos en AWS
-1. Rol IAM OIDC para GitHub (confía en `token.actions.githubusercontent.com`, repo `Keniding/agent-aws`)
-   con permisos para CloudFormation, IAM, Lambda, S3 y `bedrock-agentcore:*`.
-2. Acceso al modelo en Bedrock y un `MODEL_ID` válido: `aws bedrock list-inference-profiles` /
-   `aws bedrock list-foundation-models`.
-3. En GitHub → Settings: secret `AWS_ROLE_ARN`; variables `AWS_REGION` (región con AgentCore harness) y `MODEL_ID`.
-
-## Uso
-- PR / ramas: `ci.yml` (ruff, pytest, empaquetado).
-- Push a `main` (o manual): `deploy.yml` → sube zip, despliega `template.yaml`, crea/actualiza el harness,
-  imprime la URL.
-- `destroy.yml` (manual): borra harness y stack.
+## Puesta en marcha
+1. Rol IAM OIDC para GitHub (confía en `token.actions.githubusercontent.com`, repo `Keniding/agent-aws`) con
+   permisos sobre CloudFormation, IAM, Lambda, DynamoDB, S3 y `bedrock-agentcore:*`.
+2. Acceso al modelo en Bedrock y un `MODEL_ID` válido (`aws bedrock list-inference-profiles`).
+3. GitHub → Settings: secret `AWS_ROLE_ARN`; variables `AWS_REGION` y `MODEL_ID`.
+4. Push a `main` (o ejecutar `deploy` a mano): sube el zip, despliega `template.yaml`, crea/actualiza el
+   harness e imprime la URL. `ci.yml` valida ramas y PRs; `destroy.yml` (manual) lo borra todo.
 
 Local: `uv sync && uv run pytest && ./scripts/package.sh`.
 
-## Notas / pendiente de validar
-- No pude leer los docs de AWS desde el sandbox ni desplegar (sin credenciales): la forma de la API sale del
-  modelo de servicio de boto3; la política del rol del harness es un punto de partida, afínala con la página
-  *harness-security* de AWS. Probar en una cuenta real antes de confiar.
-- La Function URL es pública (`AuthType NONE`) y sin límite de gasto: para algo real, añade auth/WAF/throttling.
+## Pendiente de validar
+- Sin acceso a los docs de AWS ni a una cuenta desde el sandbox: la forma de la API sale del modelo de
+  servicio de boto3 y la política del rol del harness es un punto de partida (ver *harness-security*).
+- La URL es pública (`AuthType NONE`) y cualquiera puede crear incidencias y gastar tokens: antes de uso
+  real, añade autenticación (Cognito/IAM), WAF y límites.
+- La lista usa `Scan` (válido para volúmenes pequeños); para muchos datos, añade un índice por estado/fecha.

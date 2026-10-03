@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: Demo - Lambda Function URL (web+API) in front of an AgentCore harness
+Description: Sistema de incidencias - Lambda Function URL (web+API), DynamoDB y harness de AgentCore
 
 Parameters:
   LambdaRuntime:
@@ -7,16 +7,21 @@ Parameters:
     Description: Lambda runtime id matching the Python that built the package (derived in CI)
   HarnessName:
     Type: String
-    Default: agent_aws_demo
-  ModelId:
-    Type: String
-    Description: Bedrock model / inference-profile id the harness may invoke
+    Default: asistente_incidencias
   CodeBucket:
     Type: String
   CodeKey:
     Type: String
 
 Resources:
+  IncidentsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{AttributeName: id, AttributeType: S}]
+      KeySchema: [{AttributeName: id, KeyType: HASH}]
+      PointInTimeRecoverySpecification: {PointInTimeRecoveryEnabled: true}
+
   HarnessRole:
     Type: AWS::IAM::Role
     Properties:
@@ -64,6 +69,9 @@ Resources:
               - Effect: Allow
                 Action: bedrock-agentcore:ListHarnesses
                 Resource: "*"
+              - Effect: Allow
+                Action: [dynamodb:Scan, dynamodb:PutItem, dynamodb:UpdateItem]
+                Resource: !GetAtt IncidentsTable.Arn
 
   Function:
     Type: AWS::Lambda::Function
@@ -75,13 +83,13 @@ Resources:
       MemorySize: 256
       Code: {S3Bucket: !Ref CodeBucket, S3Key: !Ref CodeKey}
       Environment:
-        Variables: {HARNESS_NAME: !Ref HarnessName}
+        Variables: {HARNESS_NAME: !Ref HarnessName, TABLE_NAME: !Ref IncidentsTable}
 
   Url:
     Type: AWS::Lambda::Url
     Properties:
       TargetFunctionArn: !GetAtt Function.Arn
-      AuthType: NONE # public demo; add AWS_IAM or CloudFront+WAF before real use
+      AuthType: NONE # público; add AWS_IAM or CloudFront+WAF before real use
   UrlPermission:
     Type: AWS::Lambda::Permission
     Properties:
