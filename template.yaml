@@ -28,6 +28,130 @@ Resources:
       KeySchema: [{AttributeName: id, KeyType: HASH}]
       PointInTimeRecoverySpecification: {PointInTimeRecoveryEnabled: true}
 
+  # --- Órdenes de cambio: tabla propia, herramientas serverless (Lambda) y AgentCore Gateway (MCP) ---
+  ChangeOrdersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{AttributeName: id, AttributeType: S}]
+      KeySchema: [{AttributeName: id, KeyType: HASH}]
+      PointInTimeRecoverySpecification: {PointInTimeRecoveryEnabled: true}
+
+  OcToolsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - {Effect: Allow, Principal: {Service: lambda.amazonaws.com}, Action: "sts:AssumeRole"}
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      Policies:
+        - PolicyName: orders-table
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:  # sin DeleteItem: ni el agente ni nadie borra órdenes; solo se cierran
+              - Effect: Allow
+                Action: [dynamodb:Scan, dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem]
+                Resource: !GetAtt ChangeOrdersTable.Arn
+  OcToolsFunction:  # mismo paquete de código que la app, otro manejador
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: !Ref LambdaRuntime
+      Handler: oc_tools.handler
+      Role: !GetAtt OcToolsRole.Arn
+      Timeout: 15
+      MemorySize: 256
+      Code: {S3Bucket: !Ref CodeBucket, S3Key: !Ref CodeKey}
+      Environment:
+        Variables: {OC_TABLE_NAME: !Ref ChangeOrdersTable}
+
+  OcGatewayRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: bedrock-agentcore.amazonaws.com}
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals: {"aws:SourceAccount": !Ref AWS::AccountId}
+              ArnLike: {"aws:SourceArn": !Sub "arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:gateway/*"}
+      Policies:
+        - PolicyName: invoke-oc-tools
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - {Effect: Allow, Action: "lambda:InvokeFunction", Resource: !GetAtt OcToolsFunction.Arn}
+  OcGateway:  # entrada IAM: solo el rol del harness puede llamarlo (bedrock-agentcore:InvokeGateway)
+    Type: AWS::BedrockAgentCore::Gateway
+    Properties:
+      Name: !Sub "${AWS::StackName}-oc"
+      Description: Herramientas de órdenes de cambio para el agente
+      ProtocolType: MCP
+      AuthorizerType: AWS_IAM
+      RoleArn: !GetAtt OcGatewayRole.Arn
+  OcGatewayTarget:
+    Type: AWS::BedrockAgentCore::GatewayTarget
+    Properties:
+      GatewayIdentifier: !GetAtt OcGateway.GatewayIdentifier
+      Name: oc
+      Description: Registrar, consultar, evaluar y anotar órdenes de cambio
+      CredentialProviderConfigurations: [{CredentialProviderType: GATEWAY_IAM_ROLE}]
+      TargetConfiguration:
+        Mcp:
+          Lambda:
+            LambdaArn: !GetAtt OcToolsFunction.Arn
+            ToolSchema:
+              InlinePayload:
+                - Name: listar_oc
+                  Description: Lista las órdenes de cambio (id, título, tipo, servicio, estado, riesgo). Sin filtro devuelve todas.
+                  InputSchema:
+                    Type: object
+                    Properties:
+                      estado: {Type: string, Description: "Filtra por estado: solicitada, evaluada, aprobada, programada, ejecutada, verificada, rechazada, cancelada o revertida"}
+                - Name: consultar_oc
+                  Description: Devuelve una orden con su evaluación y su historial. Usa un id de 32 caracteres devuelto por listar_oc.
+                  InputSchema:
+                    Type: object
+                    Properties:
+                      id: {Type: string, Description: "Id de la orden (32 caracteres)"}
+                    Required: [id]
+                - Name: registrar_oc
+                  Description: Registra una solicitud de cambio nueva en estado solicitada. No ejecuta ningún cambio en AWS. El id lo genera el sistema.
+                  InputSchema:
+                    Type: object
+                    Properties:
+                      titulo: {Type: string, Description: "Título corto del cambio"}
+                      tipo: {Type: string, Description: "modificar_valor (cambiar un valor existente) o nuevo_recurso (pedir un recurso nuevo)"}
+                      servicio: {Type: string, Description: "Servicio de AWS afectado, p. ej. Lambda o DynamoDB"}
+                      recurso: {Type: string, Description: "Nombre o ARN del recurso afectado"}
+                      parametro: {Type: string, Description: "Parámetro que cambia (obligatorio en modificar_valor)"}
+                      valor_actual: {Type: string, Description: "Valor actual, si se conoce"}
+                      valor_propuesto: {Type: string, Description: "Valor nuevo (obligatorio en modificar_valor)"}
+                      justificacion: {Type: string, Description: "Por qué hace falta el cambio"}
+                    Required: [titulo, tipo, servicio]
+                - Name: evaluar_oc
+                  Description: Evalúa una orden solicitada (pasa a evaluada). Exige riesgo, impacto, plan y vuelta atrás. No aprueba la orden.
+                  InputSchema:
+                    Type: object
+                    Properties:
+                      id: {Type: string, Description: "Id de la orden (32 caracteres)"}
+                      riesgo: {Type: string, Description: "baja, media o alta"}
+                      impacto: {Type: string, Description: "Qué se afecta y cuánto dura"}
+                      plan: {Type: string, Description: "Cómo se ejecutaría el cambio, en pasos cortos"}
+                      rollback: {Type: string, Description: "Cómo se vuelve atrás si sale mal"}
+                    Required: [id, riesgo, impacto, plan, rollback]
+                - Name: agregar_nota_oc
+                  Description: Añade una nota al historial de una orden sin cambiar su estado.
+                  InputSchema:
+                    Type: object
+                    Properties:
+                      id: {Type: string, Description: "Id de la orden (32 caracteres)"}
+                      nota: {Type: string, Description: "Texto de la nota"}
+                    Required: [id, nota]
+
   HarnessRole:
     Type: AWS::IAM::Role
     Properties:
@@ -79,6 +203,16 @@ Resources:
                          bedrock-agentcore:GetEvent, bedrock-agentcore:ListEvents,
                          bedrock-agentcore:RetrieveMemoryRecords]
                 Resource: !Sub "arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:memory/${HarnessName}-*"
+              - Effect: Allow  # herramientas de órdenes de cambio: solo este gateway
+                Action: bedrock-agentcore:InvokeGateway
+                Resource: !GetAtt OcGateway.GatewayArn
+              - Effect: Allow  # habilidades (SKILL.md) desde el bucket de código, solo el prefijo skills/
+                Action: s3:GetObject
+                Resource: !Sub "arn:${AWS::Partition}:s3:::${CodeBucket}/skills/*"
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !Sub "arn:${AWS::Partition}:s3:::${CodeBucket}"
+                Condition: {StringLike: {"s3:prefix": "skills/*"}}
               - Effect: Allow
                 Action: [bedrock-agentcore:GetWorkloadAccessToken,bedrock-agentcore:GetWorkloadAccessTokenForJWT]
                 Resource:
@@ -111,6 +245,9 @@ Resources:
               - Effect: Allow
                 Action: [dynamodb:Scan, dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem]
                 Resource: !GetAtt IncidentsTable.Arn
+              - Effect: Allow  # órdenes de cambio (la web las lista y las mueve de estado; nunca se borran)
+                Action: [dynamodb:Scan, dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem]
+                Resource: !GetAtt ChangeOrdersTable.Arn
               - Effect: Allow  # autenticación: clave de firma de la sesión y descubrimiento del cliente
                 Action: secretsmanager:GetSecretValue
                 Resource: !Ref SessionSecret
@@ -213,6 +350,8 @@ Resources:
         Variables:
           HARNESS_NAME: !Ref HarnessName
           TABLE_NAME: !Ref IncidentsTable
+          OC_TABLE_NAME: !Ref ChangeOrdersTable
+          OC_ALLOWED_TOOLS: "@oc"  # nombre de la herramienta «agentcore_gateway» que scripts/harness.py añade al harness
           COGNITO_POOL_ID: !Ref UserPool
           COGNITO_DOMAIN: !Ref UserPoolDomain
           SESSION_SECRET_ARN: !Ref SessionSecret
@@ -239,5 +378,7 @@ Resources:
 
 Outputs:
   HarnessRoleArn: {Value: !GetAtt HarnessRole.Arn}
+  OcGatewayArn: {Value: !GetAtt OcGateway.GatewayArn}
+  SkillsUri: {Value: !Sub "s3://${CodeBucket}/skills/"}
   WebUrl: {Value: !GetAtt Url.FunctionUrl}
   UserPoolId: {Value: !Ref UserPool}

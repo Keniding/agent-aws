@@ -40,6 +40,20 @@ class FakeToolStream:
         yield {"messageStop": {"stopReason": "tool_use"}}
 
 
+class FakeGatewayStream:
+    """Herramienta que ejecuta el propio harness (Gateway): aparece en el flujo, pero no se devuelve a la app."""
+
+    def __init__(self, name, text):
+        self.name, self.text = name, text
+
+    def __iter__(self):
+        yield {"contentBlockStart": {"contentBlockIndex": 0, "start": {
+            "toolUse": {"toolUseId": "gw1", "name": self.name, "type": "tool_use"}}}}
+        yield {"contentBlockStop": {"contentBlockIndex": 0}}
+        yield {"contentBlockDelta": {"contentBlockIndex": 1, "delta": {"text": self.text}}}
+        yield {"messageStop": {"stopReason": "end_turn"}}
+
+
 class FakeRuntime:
     """Agente falso con el mismo protocolo que el harness: pide herramientas y luego responde."""
 
@@ -67,12 +81,15 @@ class FakeRuntime:
                 return {"stream": FakeToolStream(*step)}
         return {"stream": FakeStream("Incidencia gestionada.")}
 
-    def invoke_harness(self, harnessArn, runtimeSessionId, messages, tools=None, allowedTools=None):
+    def invoke_harness(self, harnessArn, runtimeSessionId, messages, tools=None, allowedTools=None, **_):
+        self.last_allowed = allowedTools
         first = messages[0]["content"][0]
         sid = runtimeSessionId
         if "toolResult" in first:
             return self._next(self.queue.get(sid, []), first["toolResult"]["content"][0]["text"])
         text = first["text"]
+        if "ÓRDENES DE CAMBIO" in text:  # el Gateway lo ejecuta el propio harness: la app solo ve el aviso y el texto
+            return {"stream": FakeGatewayStream("oc___listar_oc", "Revisé las órdenes abiertas.")}
         if text.startswith("Ha entrado una incidencia nueva"):
             iid = text.split("id ")[1].split(")")[0]
             crit = any(w in text.lower() for w in ("caída", "caida", "caído", "caido"))
@@ -101,13 +118,14 @@ def build_app():
 
     os.environ.update(AWS_DEFAULT_REGION="us-east-1", AWS_ACCESS_KEY_ID="x",
                       AWS_SECRET_ACCESS_KEY="x", HARNESS_NAME="local", TABLE_NAME="incidencias",
-                      AUTH_DISABLED="1")
+                      OC_TABLE_NAME="ordenes", OC_ALLOWED_TOOLS="@oc", AUTH_DISABLED="1")
     mock = mock_aws()
     mock.start()
-    boto3.client("dynamodb").create_table(
-        TableName="incidencias", BillingMode="PAY_PER_REQUEST",
-        AttributeDefinitions=[{"AttributeName": "id", "AttributeType": "S"}],
-        KeySchema=[{"AttributeName": "id", "KeyType": "HASH"}])
+    for name in ("incidencias", "ordenes"):
+        boto3.client("dynamodb").create_table(
+            TableName=name, BillingMode="PAY_PER_REQUEST",
+            AttributeDefinitions=[{"AttributeName": "id", "AttributeType": "S"}],
+            KeySchema=[{"AttributeName": "id", "KeyType": "HASH"}])
     sys.path.insert(0, ROOT)
     import app
 

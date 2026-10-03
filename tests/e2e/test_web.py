@@ -38,6 +38,8 @@ def page(browser, base_url):
     app = sys.modules["app"]  # el servidor local comparte tabla entre pruebas: se vacía en cada una
     for item in app._table.scan()["Items"]:
         app._table.delete_item(Key={"id": item["id"]})
+    for item in app.oc._table.scan()["Items"]:
+        app.oc._table.delete_item(Key={"id": item["id"]})
     ctx = browser.new_context(viewport={"width": 1280, "height": 900})
     pg = ctx.new_page()
     pg.route("**/fonts.googleapis.com/**", lambda r: r.abort())  # sin red: cae a fuentes locales
@@ -423,3 +425,91 @@ def test_small_header_text_meets_wcag_aa_contrast(page, theme):
     for selector in ("header p", "#who", ".themes .label"):
         fg, bg = page.locator(selector).first.evaluate(parse)
         assert _ratio(fg, bg) >= 4.5, f"{selector}: {_ratio(fg, bg):.2f}:1"
+
+
+# --- Órdenes de cambio: módulo aparte ---
+def oc_view(page):
+    page.get_by_role("button", name="Órdenes de cambio", exact=True).click()
+    page.locator("#oc-view").wait_for(state="visible")
+
+
+def oc_new(page, titulo="Subir memoria de la Lambda", valor="512"):
+    page.get_by_role("button", name="Pedir un cambio").first.click()
+    page.get_by_label("Título corto").fill(titulo)
+    page.get_by_label("Servicio de AWS").fill("Lambda")
+    page.get_by_label("Parámetro").fill("MemorySize")
+    page.get_by_label("Valor actual").fill("256")
+    page.get_by_label("Valor propuesto").fill(valor)
+    page.get_by_role("button", name="Registrar orden").click()
+    page.locator("article.oc", has_text=titulo).wait_for()
+    return page.locator("article.oc", has_text=titulo)
+
+
+def test_oc_module_is_separate_from_incidents(page):
+    mk(page, "Error de impresora")
+    page.reload()
+    assert page.locator("#inc-view").is_visible() and not page.locator("#oc-view").is_visible()
+    oc_view(page)
+    assert not page.locator("#inc-view").is_visible()
+    assert page.get_by_text("No hay órdenes abiertas.").is_visible()
+    page.get_by_role("button", name="Incidencias", exact=True).click()
+    page.locator("#inc-view").wait_for(state="visible")
+    assert card_of(page, "Error de impresora").count() == 1
+
+
+def test_oc_happy_path_through_the_whole_flow(page):
+    oc_view(page)
+    card = oc_new(page)
+    assert "MemorySize: 256 → 512" in card.inner_text()
+    assert card.locator("li.cur").inner_text().lower().endswith("solicitada")
+    card.get_by_role("button", name="Evaluar:").click()  # abre el formulario de evaluación
+    card.get_by_label("Impacto").fill("Sin corte previsto")
+    card.get_by_label("Plan").fill("Subir MemorySize a 512 y desplegar")
+    card.get_by_label("Vuelta atrás").fill("Volver a 256")
+    card.get_by_role("button", name="Guardar evaluación").click()
+    card.get_by_role("button", name="Aprobar:").wait_for()
+    assert "riesgo media" in card.inner_text().lower()
+    for boton, estado in (("Aprobar:", "aprobada"), ("Programar:", "programada"),
+                          ("Marcar ejecutada:", "ejecutada"), ("Verificar:", "verificada")):
+        card.get_by_role("button", name=boton).click()
+        page.locator("article.oc", has_text="Subir memoria").locator("li.cur", has_text=estado).wait_for() \
+            if estado != "verificada" else None
+    page.get_by_role("button", name="Cerradas 1").wait_for()  # una orden verificada sale de «Abiertas»
+    page.get_by_role("button", name="Cerradas 1").click()
+    closed = page.locator("article.oc", has_text="Subir memoria")
+    closed.get_by_text("Historial (6)").click()
+    assert "Solicitada → Evaluada" in closed.inner_text()
+    assert closed.get_by_role("button", name="Aprobar").count() == 0  # cerrada: sin acciones
+
+
+def test_oc_reject_needs_a_reason_and_the_human_decides(page):
+    oc_view(page)
+    card = oc_new(page, "Cambiar retención de logs")
+    assert card.get_by_role("button", name="Aprobar").count() == 0  # sin evaluar no se puede aprobar
+    card.get_by_role("button", name="Rechazar:").click()
+    card.get_by_role("button", name="Confirmar: rechazar").click()  # sin motivo: el navegador lo exige
+    assert card.get_by_label("Motivo (obligatorio)").evaluate("e => !e.validity.valid")
+    card.get_by_label("Motivo (obligatorio)").fill("Fuera de alcance")
+    card.get_by_role("button", name="Confirmar: rechazar").click()
+    page.get_by_role("button", name="Cerradas 1").wait_for()
+
+
+def test_oc_agent_runs_gateway_tools_and_shows_what_it_did(page):
+    oc_view(page)
+    page.get_by_role("button", name="¿Qué falta por hacer?").click()
+    page.locator("#oc-agent").get_by_text("Revisó las órdenes", exact=False).wait_for()
+    assert "Revisé las órdenes abiertas." in page.locator("#oc-agent").inner_text()
+    page.reload()  # la conversación del módulo se conserva
+    assert "Revisé las órdenes abiertas." in page.locator("#oc-agent").inner_text()
+    assert page.locator("#agent").inner_text() == ""  # y no se mezcla con la de incidencias
+
+
+def test_oc_view_fits_a_phone_and_hides_the_floating_button(browser, base_url):
+    ctx = browser.new_context(viewport={"width": 390, "height": 800})
+    pg = ctx.new_page()
+    pg.route("**/fonts.googleapis.com/**", lambda r: r.abort())
+    pg.goto(base_url)
+    oc_view(pg)
+    assert pg.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+    assert not pg.locator("#fab").is_visible()
+    ctx.close()

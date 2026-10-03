@@ -3,6 +3,7 @@
 Usage: uv run scripts/harness.py up|down
 Env:   HARNESS_NAME, HARNESS_ROLE_ARN (up only); MODEL_ID, API_FORMAT optional
        (default: nvidia.nemotron-nano-9b-v2 via Bedrock Mantle, chat_completions)
+       OC_GATEWAY_ARN, SKILLS_URI optional: módulo de órdenes de cambio (gateway «oc» + habilidad gestion-oc)
 """
 
 import os
@@ -45,6 +46,16 @@ def up():
         "maxIterations": 10,
         "timeoutSeconds": 100,
     }
+    # Órdenes de cambio: herramientas serverless detrás de AgentCore Gateway y habilidad (SKILL.md) en S3.
+    # Si no hay gateway (despliegue sin el módulo), el harness queda solo con las funciones en línea de la app.
+    if os.environ.get("OC_GATEWAY_ARN"):
+        spec["tools"] = [{"type": "agentcore_gateway", "name": "oc", "config": {"agentCoreGateway": {
+            "gatewayArn": os.environ["OC_GATEWAY_ARN"], "outboundAuth": {"awsIam": {}}}}}]
+        spec["systemPrompt"][0]["text"] += (
+            " Además hay un módulo de ÓRDENES DE CAMBIO (OC) de servicios de AWS: cuando te hablen de él, usa la "
+            "habilidad gestion-oc y las herramientas del gateway «oc»; nunca apruebes ni cierres una orden.")
+    if os.environ.get("SKILLS_URI"):
+        spec["skills"] = [{"s3": {"uri": os.environ["SKILLS_URI"].rstrip("/") + "/gestion-oc/"}}]
     cur = find()
     if cur:
         c.update_harness(harnessId=cur["harnessId"], **spec)

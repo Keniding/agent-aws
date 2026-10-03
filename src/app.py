@@ -9,6 +9,7 @@ import uuid
 import boto3
 
 import auth
+import oc
 
 MAX_CHARS = int(os.environ.get("MAX_MESSAGE_CHARS", "2000"))
 HARNESS_NAME = os.environ["HARNESS_NAME"]
@@ -16,6 +17,14 @@ TABLE = os.environ["TABLE_NAME"]
 # InvokeHarness: runtimeSessionId de 33 a 100 caracteres y debe empezar por letra o número (API_InvokeHarness)
 SESSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{32,99}$")
 STATUSES = {"abierta", "en_curso", "resuelta"}
+# Herramientas ajenas a esta app que el harness ejecuta por su cuenta (p. ej. «@oc»: el Gateway de órdenes de cambio).
+# Solo se permiten en el módulo de órdenes de cambio; en incidencias el agente sigue limitado a las funciones en línea.
+OC_ALLOWED = [t for t in os.environ.get("OC_ALLOWED_TOOLS", "").split(",") if t]
+OC_PROMPT = (
+    "[Módulo de ÓRDENES DE CAMBIO. Usa la habilidad gestion-oc y SOLO las herramientas del gateway de órdenes de "
+    "cambio (listar_oc, consultar_oc, registrar_oc, evaluar_oc, agregar_nota_oc). No uses las herramientas de "
+    "incidencias. Tú no apruebas, programas ni cierras órdenes: eso lo hace una persona desde la web. Esta lista es "
+    "la única fuente de verdad; no inventes ids.]\n")
 
 _runtime = boto3.client("bedrock-agentcore")
 _control = boto3.client("bedrock-agentcore-control")
@@ -139,20 +148,28 @@ def _update(iid, expr, values, names=None):
         raise ValueError("la incidencia no existe") from None
 
 
-def invoke(session_id: str, messages: list, actor: str | None = None):
-    """Una vuelta al harness: devuelve (texto, llamadas a herramientas, motivo de parada)."""
+def invoke(session_id: str, messages: list, actor: str | None = None, track: str = "incidencias",
+           seen: list | None = None):
+    """Una vuelta al harness: devuelve (texto, llamadas a herramientas, motivo de parada).
+
+    `seen` (opcional) recoge los nombres de las herramientas que el propio harness ejecuta (p. ej. las del Gateway).
+    """
     extra = {"actorId": actor} if actor else {}  # memoria a largo plazo aislada por usuario
-    resp = _runtime.invoke_harness(harnessArn=harness_arn(), runtimeSessionId=session_id, **extra,
-                                   messages=messages, tools=TOOLS,
-                                   allowedTools=["@" + t["name"] for t in TOOLS])  # «@nombre»: solo las nuestras, sin shell
+    if track == "oc":  # solo las herramientas del Gateway: ni las funciones de incidencias ni el shell
+        extra.update(allowedTools=OC_ALLOWED)
+    else:  # «@nombre»: solo las nuestras, sin shell
+        extra.update(tools=TOOLS, allowedTools=["@" + t["name"] for t in TOOLS])
+    resp = _runtime.invoke_harness(harnessArn=harness_arn(), runtimeSessionId=session_id, messages=messages, **extra)
     text, calls, cur, stop = [], [], None, None
     for event in resp["stream"]:
         tu = event.get("contentBlockStart", {}).get("start", {}).get("toolUse")
         if tu:
             cur = None  # solo nuestras herramientas se ejecutan aquí; las ajenas se ignoran
-            if tu["name"] in {t["name"] for t in TOOLS}:
+            if track != "oc" and tu["name"] in {t["name"] for t in TOOLS}:
                 cur = {"id": tu["toolUseId"], "name": tu["name"], "input": ""}
                 calls.append(cur)
+            elif seen is not None and track == "oc":  # en incidencias una herramienta ajena ni se ejecuta ni se cuenta
+                seen.append(tu["name"].split("___", 1)[-1])
         delta = event.get("contentBlockDelta", {}).get("delta", {})
         if "text" in delta:
             text.append(delta["text"])
@@ -164,11 +181,13 @@ def invoke(session_id: str, messages: list, actor: str | None = None):
     return "".join(text).rsplit("</think>", 1)[-1].strip(), calls, stop
 
 
-def ask(session_id: str, text: str, actor: str | None = None):
+def ask(session_id: str, text: str, actor: str | None = None, track: str = "incidencias"):
     """Bucle del agente: el harness decide, aquí se ejecutan sus herramientas. -> (respuesta, acciones)."""
     messages, actions, reply = [{"role": "user", "content": [{"text": text}]}], [], ""
     for _ in range(MAX_STEPS):
-        reply, calls, stop = invoke(session_id, messages, actor)
+        seen = []
+        reply, calls, stop = invoke(session_id, messages, actor, track, seen)
+        actions += [{"tool": n, "ok": True} for n in seen]
         if stop != "tool_use" or not calls:
             break
         results = []
@@ -232,7 +251,17 @@ def snapshot() -> str:
             + ("\n".join(rows) or "(ninguna)") + more)
 
 
-def chat(session_id: str, message: str, actor: str | None = None):
+def oc_snapshot() -> str:
+    """Órdenes de cambio abiertas: fuente de verdad que se adjunta a cada pregunta del módulo."""
+    abiertas = [o for o in oc.listar() if o["estado"] not in oc.TERMINALES]
+    rows = [f"- {o['id']} · {o['estado']} · {o['servicio']} · {o['titulo']}" for o in abiertas[:20]]
+    return (f"[Órdenes de cambio abiertas ({len(abiertas)}).]\n" + ("\n".join(rows) or "(ninguna)")
+            + (f"\n(y {len(abiertas) - 20} más)" if len(abiertas) > 20 else ""))
+
+
+def chat(session_id: str, message: str, actor: str | None = None, track: str = "incidencias"):
+    if track == "oc":
+        return ask(session_id, f"{OC_PROMPT}{message}\n\n{oc_snapshot()}", actor, "oc")
     return ask(session_id, f"{message}\n\n{snapshot()}", actor)
 
 
@@ -301,6 +330,24 @@ def _handle(event, _context):
             return _json(400, {"error": "falta el título"})
         return _json(201, create_incident(title, desc))
 
+    # --- Órdenes de cambio (módulo aparte: no toca nada de incidencias) ---
+    quien = user.get("email") or user.get("name") or "usuario"
+    try:
+        if method == "GET" and path == "/api/oc":
+            return _json(200, oc.listar())
+        if method == "POST" and path == "/api/oc":
+            return _json(201, oc.crear(body, quien))
+        m = re.fullmatch(r"/api/oc/([0-9a-f]{32})/(evaluar|mover|nota)", path)
+        if method == "POST" and m:
+            oc_id, accion = m.groups()
+            if accion == "evaluar":
+                return _json(200, oc.evaluar(oc_id, body, quien))
+            if accion == "nota":
+                return _json(200, oc.nota(oc_id, body.get("nota"), quien))
+            return _json(200, oc.mover(oc_id, body.get("a"), quien, body.get("nota")))
+    except oc.OcError as exc:
+        return _json(400, {"error": str(exc)})
+
     m = re.fullmatch(r"/api/incidents/([0-9a-f]{32})", path)
     if method == "PATCH" and m:
         if body.get("status") not in STATUSES:
@@ -323,7 +370,8 @@ def _handle(event, _context):
         if not SESSION_RE.match(sid):
             return _json(400, {"error": "session_id inválido"})
         try:
-            reply, actions = chat(sid, message, user.get("sub"))
+            track = "oc" if body.get("track") == "oc" and OC_ALLOWED else "incidencias"
+            reply, actions = chat(sid, message, user.get("sub"), track)
             return _json(200, {"session_id": sid, "reply": reply, "actions": actions})
         except Exception as exc:  # noqa: BLE001 - solo exponemos la clase del error
             print("chat failed:", repr(exc))

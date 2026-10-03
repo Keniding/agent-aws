@@ -34,6 +34,8 @@ jobs:
             aws s3 mb "s3://$BUCKET" --region "$AWS_REGION"
           KEY="lambda-${GITHUB_SHA}.zip"
           aws s3 cp build/lambda.zip "s3://$BUCKET/$KEY"
+          # Habilidades del agente (SKILL.md): el harness las lee de S3 con su rol de ejecución
+          aws s3 sync skills "s3://$BUCKET/skills/" --delete
           echo "BUCKET=$BUCKET" >> "$GITHUB_ENV"; echo "KEY=$KEY" >> "$GITHUB_ENV"
       - name: Deploy stack
         run: |
@@ -47,6 +49,10 @@ jobs:
         run: |
           export HARNESS_ROLE_ARN=$(aws cloudformation describe-stacks --stack-name "$STACK" \
             --query "Stacks[0].Outputs[?OutputKey=='HarnessRoleArn'].OutputValue" --output text)
+          export OC_GATEWAY_ARN=$(aws cloudformation describe-stacks --stack-name "$STACK" \
+            --query "Stacks[0].Outputs[?OutputKey=='OcGatewayArn'].OutputValue" --output text)
+          export SKILLS_URI=$(aws cloudformation describe-stacks --stack-name "$STACK" \
+            --query "Stacks[0].Outputs[?OutputKey=='SkillsUri'].OutputValue" --output text)
           MODEL_ID="${{ vars.MODEL_ID }}" uv run scripts/harness.py up
       - name: URL
         run: aws cloudformation describe-stacks --stack-name "$STACK" --query "Stacks[0].Outputs[?OutputKey=='WebUrl'].OutputValue" --output text

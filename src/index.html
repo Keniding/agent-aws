@@ -96,22 +96,22 @@ button:disabled{opacity:.55;cursor:progress}
 .tile:hover:not(:disabled){border-color:var(--accent);outline:1px solid var(--accent)}
 .chatting .tile{min-height:0}
 .chatting .tile span{display:none}
-#chat{margin-top:var(--space-4);flex:none}
-#chat .row{flex-wrap:nowrap;align-items:stretch}
-#chat input{margin:0;flex:1}
-#chat label{margin:0 0 var(--space-1)}
+#chat,#oc-chat{margin-top:var(--space-4);flex:none}
+#chat .row,#oc-chat .row{flex-wrap:nowrap;align-items:stretch}
+#chat input,#oc-chat input{margin:0;flex:1}
+#chat label,#oc-chat label{margin:0 0 var(--space-1)}
 
 /* Respuestas; el hilo del agente tiene su propio scroll y el campo queda siempre abajo */
 .answer{margin-top:var(--space-4)}
 .answer:empty{display:none}
 .reply{border-left:3px solid var(--accent);padding:var(--space-1) var(--space-4);white-space:pre-wrap}
-#agent{flex:1 1 auto;min-height:0;overflow-y:auto;margin-top:var(--space-4);padding-right:var(--space-1);
+#agent,#oc-agent{flex:1 1 auto;min-height:0;overflow-y:auto;margin-top:var(--space-4);padding-right:var(--space-1);
  overscroll-behavior:contain}
-#agent:empty{display:flex;align-items:center;justify-content:center;text-align:center;color:var(--ink-muted);
+#agent:empty,#oc-agent:empty{display:flex;align-items:center;justify-content:center;text-align:center;color:var(--ink-muted);
  font-size:14px;border:1px dashed var(--rule);padding:var(--space-4);min-height:96px}
-#agent:empty::before{content:"Elige una acción o escríbele abajo. Aquí verás la conversación."}
+#agent:empty::before,#oc-agent:empty::before{content:"Elige una acción o escríbele abajo. Aquí verás la conversación."}
 .msg{margin-top:var(--space-4)}
-#agent>.msg:first-child{margin-top:0}
+#agent>.msg:first-child,#oc-agent>.msg:first-child{margin-top:0}
 .msg.me{margin-left:auto;width:fit-content;max-width:88%;background:var(--ink);color:var(--surface);
  padding:var(--space-2) var(--space-4);border-radius:2px}
 .msg.me .label{color:inherit;opacity:.7}
@@ -163,6 +163,21 @@ summary{cursor:pointer;font:600 14px/22px var(--sans);color:var(--ink-muted)}
 .steps li::before{content:"► "}
 .acts{display:flex;gap:var(--space-2);flex-wrap:wrap;margin-top:var(--space-4)}
 .empty{text-align:center;padding:var(--space-8) 0}
+/* Órdenes de cambio: el flujo se ve de un vistazo como una línea de pasos */
+.modes{margin-right:var(--space-2)}
+.flow{display:flex;gap:2px;flex-wrap:wrap;list-style:none;margin:var(--space-2) 0 0;padding:0}
+.flow li{flex:1 1 84px;font:600 11px/16px var(--sans);letter-spacing:.06em;text-transform:uppercase;
+ padding:6px 4px 0;border-top:3px solid var(--grid-line);color:var(--ink-muted)}
+.flow li.done{border-top-color:var(--status-valid);color:var(--ink)}.flow li.done::before{content:"✓ "}
+.flow li.cur{border-top-color:var(--accent);color:var(--ink)}.flow li.cur::before{content:"● "}
+.flow.off li{opacity:.55}
+.ocline{font:14px/22px var(--mono);margin:var(--space-1) 0;padding:var(--space-1) var(--space-2);
+ background:var(--surface);border-left:3px solid var(--rule);overflow-wrap:anywhere}
+.slot:empty{display:none}.slot{margin-top:var(--space-2);padding:var(--space-2) var(--space-4);border-left:3px solid var(--accent);background:var(--surface)}
+.slot .row{margin-top:var(--space-2)}
+.oc.cerrada h3{color:var(--ink-muted)}
+.hist{margin:var(--space-1) 0 0;padding:0;list-style:none;font:13px/20px var(--mono);color:var(--ink-muted)}
+body.view-oc .fab{display:none!important}
 .err{color:var(--accent);font-weight:600}
 #toast{position:fixed;left:50%;bottom:var(--space-4);transform:translateX(-50%);z-index:10;display:flex;gap:var(--space-4);
  align-items:center;background:var(--ink);color:var(--surface);padding:var(--space-2) var(--space-4);
@@ -184,6 +199,9 @@ summary{cursor:pointer;font:600 14px/22px var(--sans);color:var(--ink-muted)}
 <header>
  <div class="brand"><h1>Inciden<span>cias</span></h1><p>Dile al agente qué pasa; él se encarga.</p></div>
  <div class="bar">
+  <nav class="themes modes" aria-label="Módulo">
+   <button class="ghost" data-v="inc" aria-pressed="true">Incidencias</button>
+   <button class="ghost" data-v="oc" aria-pressed="false">Órdenes de cambio</button></nav>
   <div class="user"><span id="who" hidden></span><button id="out" type="button" hidden>Salir</button></div>
   <nav class="themes" aria-label="Tema"><span class="label">Tema</span>
    <button class="ghost" data-theme="auto" aria-pressed="true">Auto</button>
@@ -192,7 +210,7 @@ summary{cursor:pointer;font:600 14px/22px var(--sans);color:var(--ink-muted)}
    <button class="ghost" data-theme="contrast" aria-pressed="false">Alto contraste</button></nav>
  </div>
 </header>
-<main class="layout">
+<main class="layout" id="inc-view">
  <aside id="agentcard" class="card agentcard" aria-labelledby="ht"><span class="label muted">Agente</span>
   <h2 id="ht">¿Qué necesitas hoy?</h2>
   <div class="tiles">
@@ -243,6 +261,64 @@ summary{cursor:pointer;font:600 14px/22px var(--sans);color:var(--ink-muted)}
   <div id="list" aria-live="polite"></div></section>
  </div>
 </main>
+
+<!-- Órdenes de cambio: módulo aparte. Solo se hace seguimiento; el cambio real lo ejecuta una persona fuera de aquí. -->
+<section id="oc-view" class="layout" aria-label="Órdenes de cambio" hidden>
+ <aside id="oc-agentcard" class="card agentcard" aria-labelledby="oc-ht"><span class="label muted">Agente // Órdenes de cambio</span>
+  <h2 id="oc-ht">¿Qué cambio necesitas?</h2>
+  <div class="tiles">
+   <button class="tile primary" id="oc-open-new" type="button"><b>Pedir un cambio</b><span>Un valor de un servicio o un recurso nuevo</span></button>
+   <button class="tile" data-oq="pend" type="button"><b>¿Qué falta por hacer?</b><span>Estado de las órdenes abiertas</span></button>
+   <button class="tile" data-oq="eval" type="button"><b>Evaluar la primera</b><span>Riesgo, impacto, plan y vuelta atrás</span></button>
+   <button class="tile" data-oq="explain" type="button"><b>¿Cómo funciona?</b><span>El flujo, paso a paso</span></button>
+  </div>
+  <div id="oc-agent" class="answer" aria-live="polite"></div>
+  <form id="oc-chat"><label for="oc-m" class="label muted">Pídele algo sobre las órdenes</label>
+   <div class="row"><input type="text" id="oc-m" required maxlength="2000" autocomplete="off"
+     placeholder="Ej.: sube la memoria de la Lambda de pagos a 512 MB"><button id="oc-send">Enviar</button></div></form>
+ </aside>
+
+ <div class="col">
+  <form id="oc-new" class="card" hidden><span class="label muted">Alta // Nueva orden de cambio</span>
+   <h2>Pedir un cambio</h2>
+   <div class="step"><span class="label">1 · ¿Qué quieres?</span>
+    <div class="opts" role="radiogroup" aria-label="Tipo de cambio">
+     <label><input type="radio" name="oc-tipo" value="modificar_valor" checked><span>Cambiar un valor</span></label>
+     <label><input type="radio" name="oc-tipo" value="nuevo_recurso"><span>Pedir un recurso nuevo</span></label></div></div>
+   <div class="step"><span class="label">2 · ¿Dónde?</span>
+    <label for="oc-titulo" class="label muted">Título corto</label>
+    <input type="text" id="oc-titulo" maxlength="200" required placeholder="Ej.: Subir memoria de la Lambda de pagos">
+    <label for="oc-servicio" class="label muted">Servicio de AWS</label>
+    <input type="text" id="oc-servicio" maxlength="60" required list="oc-servicios" placeholder="Lambda, DynamoDB, S3…">
+    <datalist id="oc-servicios"><option>Lambda</option><option>DynamoDB</option><option>S3</option><option>Cognito</option>
+     <option>CloudFormation</option><option>IAM</option><option>SQS</option><option>CloudWatch</option></datalist>
+    <label for="oc-recurso" class="label muted">Recurso (nombre o ARN, opcional)</label>
+    <input type="text" id="oc-recurso" maxlength="200"></div>
+   <div class="step" id="oc-valores"><span class="label">3 · ¿Qué cambia?</span>
+    <label for="oc-parametro" class="label muted">Parámetro</label>
+    <input type="text" id="oc-parametro" maxlength="100" placeholder="Ej.: MemorySize">
+    <div class="row" style="align-items:flex-start;flex-wrap:nowrap">
+     <div style="flex:1"><label for="oc-actual" class="label muted">Valor actual (si lo sabes)</label>
+      <input type="text" id="oc-actual" maxlength="200"></div>
+     <div style="flex:1"><label for="oc-nuevo" class="label muted">Valor propuesto</label>
+      <input type="text" id="oc-nuevo" maxlength="200"></div></div></div>
+   <div class="step"><label for="oc-just" class="label muted">¿Por qué hace falta? (opcional)</label>
+    <textarea id="oc-just" rows="2" maxlength="1000"></textarea></div>
+   <div class="row" style="margin-top:var(--space-4)"><button id="oc-go">Registrar orden</button>
+    <button type="button" class="ghost" id="oc-cancel">Cancelar</button>
+    <span id="oc-ns" class="small muted" role="status"></span></div>
+  </form>
+
+  <section class="card" aria-labelledby="oc-lt"><span class="label muted">Registro // Órdenes de cambio</span>
+   <h2 id="oc-lt">Seguimiento</h2>
+   <p class="small muted" style="margin:0">Aquí solo se sigue el cambio: nada se modifica en AWS desde esta pantalla. Cada orden se evalúa, una persona la aprueba, se ejecuta fuera de aquí y se verifica.</p>
+   <div class="tabs" id="oc-filters" role="group" aria-label="Filtro" style="margin-top:var(--space-4)">
+    <button class="ghost" data-f="open" aria-pressed="true">Abiertas</button>
+    <button class="ghost" data-f="closed" aria-pressed="false">Cerradas</button>
+    <button class="ghost" data-f="all" aria-pressed="false">Todas</button></div>
+   <div id="oc-list" aria-live="polite"></div></section>
+ </div>
+</section>
 <div id="toast" role="status" hidden></div>
 <button id="fab" class="fab" type="button" hidden>Hablar con el agente</button>
 <script>
@@ -279,7 +355,7 @@ const LABELS={urgent:'Atender la más urgente',first:'¿Qué atiendo primero?',s
 let thread=[];
 try{thread=JSON.parse(localStorage.getItem('thread')||'[]')}catch{}
 function saveThread(){try{localStorage.setItem('thread',JSON.stringify(thread.slice(-20)))}catch{}}
-function resetConversation(){$('agentcard').classList.remove('chatting');sid=null;thread=[];try{localStorage.removeItem('sid');localStorage.removeItem('thread')}catch{};$('agent').replaceChildren()}
+function resetConversation(){$('agentcard').classList.remove('chatting');sid=null;thread=[];try{localStorage.removeItem('sid');localStorage.removeItem('thread')}catch{};$('agent').replaceChildren();ocReset()}
 function turn(q,j){
  const me=el('div','msg me');me.append(el('div','label muted','Tú //'),el('div',null,q));
  const bot=el('div','msg bot');if(j)bot.append(answer(j));return [me,bot]}
@@ -407,4 +483,123 @@ $("out").onclick=async()=>{try{const r=await fetch("/auth/logout",{method:"POST"
 api("/api/me").then(m=>{try{if(localStorage.getItem("who")!==m.email){if(localStorage.getItem("who")!==null)resetConversation();localStorage.setItem("who",m.email)}}catch{}
  renderThread();if(!m.local){$("who").textContent=(m.name&&m.name!==m.email)?m.name+" · "+m.email:(m.email||m.name);$("who").hidden=false;$("out").hidden=false}}).catch(()=>{});
 load();
+
+/* ===== Órdenes de cambio (módulo aparte; no comparte estado con incidencias) ===== */
+const OCF=['solicitada','evaluada','aprobada','programada','ejecutada','verificada'];
+const OCL={solicitada:'Solicitada',evaluada:'Evaluada',aprobada:'Aprobada',programada:'Programada',ejecutada:'Ejecutada',verificada:'Verificada',rechazada:'Rechazada',cancelada:'Cancelada',revertida:'Revertida'};
+const OCT={modificar_valor:'Cambiar un valor',nuevo_recurso:'Recurso nuevo'};
+const OCTERM=['verificada','rechazada','cancelada','revertida'];
+Object.assign(DID,{listar_oc:'Revisó las órdenes',consultar_oc:'Consultó una orden',registrar_oc:'Registró la orden',evaluar_oc:'Evaluó la orden',agregar_nota_oc:'Añadió una nota'});
+const OCQ={pend:'¿Qué órdenes de cambio están abiertas y qué le falta a cada una para avanzar? Consúltalas con tus herramientas y no inventes nada.',
+ eval:'Evalúa la primera orden que esté en estado solicitada: consúltala, estima riesgo, impacto, plan y vuelta atrás, y regístralo con evaluar_oc. Si no hay ninguna, dímelo.',
+ explain:'Explícame en pocas líneas cómo funciona una orden de cambio, qué haces tú y qué tengo que hacer yo.'};
+const OCLBL={pend:'¿Qué falta por hacer?',eval:'Evaluar la primera',explain:'¿Cómo funciona?'};
+/* Cada estado ofrece lo que sigue: [texto, destino, ¿pide motivo?]. «eval» abre el formulario de evaluación. */
+const OCA={solicitada:[['Evaluar','eval'],['Rechazar','rechazada',1],['Cancelar','cancelada',1]],evaluada:[['Aprobar','aprobada'],['Rechazar','rechazada',1]],
+ aprobada:[['Programar','programada'],['Cancelar','cancelada',1]],programada:[['Marcar ejecutada','ejecutada'],['Cancelar','cancelada',1]],
+ ejecutada:[['Verificar','verificada'],['Revertir','revertida',1]]};
+let ocs=[],ocFilter='open',ocSid=null,ocBusy=false,ocThread=[],ocLoaded=false;
+try{ocSid=localStorage.getItem('oc_sid');ocThread=JSON.parse(localStorage.getItem('oc_thread')||'[]')}catch{}
+function ocReset(){ocSid=null;ocThread=[];try{localStorage.removeItem('oc_sid');localStorage.removeItem('oc_thread')}catch{};$('oc-agent').replaceChildren()}
+function ocSave(){try{localStorage.setItem('oc_thread',JSON.stringify(ocThread.slice(-20)))}catch{}}
+
+function setView(v){document.body.classList.toggle('view-oc',v==='oc');$('inc-view').hidden=v==='oc';$('oc-view').hidden=v!=='oc';
+ document.querySelectorAll('.modes [data-v]').forEach(b=>b.setAttribute('aria-pressed',b.dataset.v===v));
+ try{localStorage.setItem('view',v)}catch{}
+ if(v==='oc'&&!ocLoaded){ocLoaded=true;ocLoad();ocRenderThread()}}
+document.querySelectorAll('.modes [data-v]').forEach(b=>b.onclick=()=>setView(b.dataset.v));
+try{if(localStorage.getItem('view')==='oc')setView('oc')}catch{}
+
+function ocStepper(o){const ol=el('ol','flow'+(OCF.includes(o.estado)?'':' off')),idx=OCF.indexOf(o.estado);
+ OCF.forEach((s,i)=>{const li=el('li',idx<0?'':i<idx?'done':i===idx?'cur':'',OCL[s]);if(i===idx)li.setAttribute('aria-current','step');ol.append(li)});
+ ol.setAttribute('aria-label','Flujo de la orden');return ol}
+function ocCard(o){
+ const d=el('article','inc oc '+(OCTERM.includes(o.estado)?'cerrada':'')),ev=o.evaluacion||{};d.dataset.oc=o.id;
+ const r=el('div','row');r.append(el('span','label muted',(OCT[o.tipo]||o.tipo)+' // '+o.servicio));
+ if(ev.riesgo)r.append(el('span','sev label '+ev.riesgo,'riesgo '+ev.riesgo));
+ if(!OCF.includes(o.estado))r.append(el('span','sev label critica',OCL[o.estado]));
+ d.append(r,el('h3',null,o.titulo));
+ if(o.recurso)d.append(el('div','small muted',o.recurso));
+ if(o.tipo==='modificar_valor')d.append(el('div','ocline',`${o.parametro}: ${o.valor_actual||'—'} → ${o.valor_propuesto}`));
+ if(o.justificacion)d.append(el('div','small',o.justificacion));
+ d.append(ocStepper(o),el('div','small muted when','Pedida por '+o.solicitante+' · '+ago(o.created_at)));
+ if(ev.plan){const x=el('details');x.append(el('summary',null,'Ver evaluación'));
+  [['Impacto',ev.impacto],['Plan',ev.plan],['Vuelta atrás',ev.rollback]].forEach(([k,v])=>{const p=el('div','small');p.append(el('b',null,k+': '),document.createTextNode(v));x.append(p)});d.append(x)}
+ const h=el('details');h.append(el('summary',null,`Historial (${o.historial.length})`));const u=el('ul','hist');
+ o.historial.forEach(e=>u.append(el('li',null,`${DTF.format(new Date(e.ts*1000))} · ${e.por} · ${e.de&&e.de!==e.a?OCL[e.de]+' → ':''}${OCL[e.a]}${e.nota?': '+e.nota:''}`)));h.append(u);d.append(h);
+ const slot=el('div','slot'),acts=el('div','acts ocacts');
+ (OCA[o.estado]||[]).forEach(([t,to,why],i)=>{const b=el('button',i?'ghost':null,t);b.setAttribute('aria-label',t+': '+o.titulo);
+  b.onclick=()=>to==='eval'?ocEvalForm(o,slot):why?ocReason(o,to,t,slot):ocMove(o,to,'');acts.append(b)});
+ if(o.estado==='solicitada'){const b=el('button','ghost','Que la evalúe el agente');b.setAttribute('aria-label','Pedir al agente que evalúe: '+o.titulo);
+  b.onclick=()=>ocAsk(`Evalúa la orden ${o.id} («${o.titulo}»): consúltala y regístrala con evaluar_oc (riesgo, impacto, plan y vuelta atrás).`,'Evaluar: '+o.titulo);acts.append(b)}
+ if(!OCTERM.includes(o.estado)){const b=el('button','ghost','Añadir nota');b.onclick=()=>ocNote(o,slot);acts.append(b)}
+ d.append(acts,slot);return d}
+function ocRender(){
+ const open=ocs.filter(o=>!OCTERM.includes(o.estado)),closed=ocs.filter(o=>OCTERM.includes(o.estado));
+ const cnt={open:open.length,closed:closed.length,all:ocs.length},name={open:'Abiertas',closed:'Cerradas',all:'Todas'};
+ document.querySelectorAll('#oc-filters [data-f]').forEach(b=>{b.setAttribute('aria-pressed',b.dataset.f===ocFilter);b.textContent=`${name[b.dataset.f]} ${cnt[b.dataset.f]}`});
+ const vis={open,closed,all:ocs}[ocFilter];
+ let nodes=vis.map(ocCard);
+ if(!nodes.length){const e=el('div','empty');e.append(el('p',null,ocFilter==='open'?'No hay órdenes abiertas.':'Nada por aquí todavía.'));
+  const b=el('button',null,'Pedir un cambio');b.onclick=ocOpenNew;e.append(b);nodes=[e]}
+ $('oc-list').replaceChildren(...nodes)}
+async function ocLoad(){try{ocs=await api('/api/oc');ocRender()}catch(e){$('oc-list').replaceChildren(el('p','err','Error: '+e.message))}}
+document.querySelectorAll('#oc-filters [data-f]').forEach(b=>b.onclick=()=>{ocFilter=b.dataset.f;ocRender()});
+
+async function ocMove(o,a,nota){
+ try{await api('/api/oc/'+o.id+'/mover','POST',{a,nota});await ocLoad();toast(`«${o.titulo}» ahora está ${OCL[a].toLowerCase()}.`)}
+ catch(e){toast('No se pudo: '+e.message);ocLoad()}}
+function ocForm(slot,fields,submit,label){ /* formulario en línea dentro de la tarjeta */
+ const f=el('form');fields.forEach(x=>f.append(x));const r=el('div','row'),ok=el('button',null,label),no=el('button','ghost','Cancelar');
+ no.type='button';no.onclick=()=>slot.replaceChildren();r.append(ok,no,el('span','small err'));f.append(r);
+ f.onsubmit=async e=>{e.preventDefault();ok.disabled=true;r.lastChild.textContent='';
+  try{await submit(new FormData(f))}catch(x){r.lastChild.textContent=x.message;ok.disabled=false}};
+ slot.replaceChildren(f);const first=f.querySelector('input,textarea');if(first)first.focus()}
+function ocField(name,label,ph,tag){const w=el('div'),l=el('label','label muted',label),i=el(tag||'input');
+ const id='f-'+name+Math.random().toString(36).slice(2,7);l.htmlFor=id;i.id=id;i.name=name;i.required=true;i.maxLength=600;
+ if(ph)i.placeholder=ph;if(tag==='textarea')i.rows=2;else i.type='text';w.append(l,i);return w}
+function ocReason(o,to,t,slot){ocForm(slot,[ocField('nota','Motivo (obligatorio)','Una frase')],
+ async fd=>{await api('/api/oc/'+o.id+'/mover','POST',{a:to,nota:fd.get('nota')});await ocLoad();toast(`«${o.titulo}» ahora está ${OCL[to].toLowerCase()}.`)},'Confirmar: '+t.toLowerCase())}
+function ocNote(o,slot){ocForm(slot,[ocField('nota','Nota para el historial','Ej.: consultado con el equipo de datos')],
+ async fd=>{await api('/api/oc/'+o.id+'/nota','POST',{nota:fd.get('nota')});await ocLoad();toast('Nota añadida.')},'Añadir nota')}
+function ocEvalForm(o,slot){
+ const g=el('div','step'),opts=el('div','opts');opts.setAttribute('role','radiogroup');opts.setAttribute('aria-label','Riesgo');
+ g.append(el('span','label','Riesgo'));
+ ['baja','media','alta'].forEach((v,i)=>{const l=el('label'),r=el('input');r.type='radio';r.name='riesgo';r.value=v;r.required=true;if(i===1)r.checked=true;l.append(r,el('span',null,v));opts.append(l)});g.append(opts);
+ ocForm(slot,[g,ocField('impacto','Impacto','Qué se afecta y cuánto dura'),ocField('plan','Plan','Cómo se haría, en pasos cortos'),ocField('rollback','Vuelta atrás','Cómo se revierte si sale mal')],
+  async fd=>{await api('/api/oc/'+o.id+'/evaluar','POST',Object.fromEntries(fd));await ocLoad();toast(`«${o.titulo}» evaluada: ya puede aprobarse.`)},'Guardar evaluación')}
+
+/* Alta de una orden */
+function ocOpenNew(){$('oc-new').hidden=false;$('oc-new').scrollIntoView({block:'start'});$('oc-titulo').focus()}
+function ocTipo(){const nv=document.querySelector('input[name=oc-tipo]:checked').value==='modificar_valor';$('oc-valores').hidden=!nv;
+ $('oc-parametro').required=nv;$('oc-nuevo').required=nv}
+ocTipo();
+document.querySelectorAll('input[name=oc-tipo]').forEach(r=>r.onchange=ocTipo);
+$('oc-open-new').onclick=ocOpenNew;
+$('oc-cancel').onclick=()=>{$('oc-new').reset();ocTipo();$('oc-ns').textContent='';$('oc-new').hidden=true};
+$('oc-new').onsubmit=async e=>{e.preventDefault();if(ocBusy)return;$('oc-go').disabled=true;$('oc-ns').textContent='';
+ const tipo=document.querySelector('input[name=oc-tipo]:checked').value,nv=tipo==='modificar_valor';
+ try{const o=await api('/api/oc','POST',{tipo,titulo:$('oc-titulo').value,servicio:$('oc-servicio').value,recurso:$('oc-recurso').value,
+   parametro:nv?$('oc-parametro').value:'',valor_actual:nv?$('oc-actual').value:'',valor_propuesto:nv?$('oc-nuevo').value:'',justificacion:$('oc-just').value});
+  $('oc-new').reset();ocTipo();$('oc-new').hidden=true;ocFilter='open';await ocLoad();
+  toast('Orden registrada. Siguiente paso: evaluarla (riesgo, impacto, plan y vuelta atrás).');
+  const n=document.querySelector(`[data-oc="${o.id}"]`);if(n){n.classList.add('new');n.scrollIntoView({block:'center'});setTimeout(()=>n.classList.remove('new'),5000)}}
+ catch(x){$('oc-ns').replaceChildren(el('span','err','No se pudo registrar: '+x.message))}finally{$('oc-go').disabled=false}};
+
+/* Agente del módulo: sesión e hilo propios (track «oc»: el servidor solo le deja usar las herramientas del gateway) */
+function ocSuggest(){const c=el('div','chips suggest');
+ [['¿Qué falta por hacer?',()=>ocAsk(OCQ.pend,OCLBL.pend)],['Nueva conversación',ocReset]].forEach(([t,f])=>{const b=el('button','ghost chip',t);b.onclick=f;c.append(b)});return c}
+function ocRenderThread(){const out=$('oc-agent');out.replaceChildren(...ocThread.flatMap(t=>turn(t.q,t)));if(ocThread.length){out.append(ocSuggest());out.scrollTop=out.scrollHeight}}
+async function ocAsk(q,label){
+ if(ocBusy)return;ocBusy=true;document.querySelectorAll('#oc-view .tile,#oc-send,.ocacts button').forEach(b=>b.disabled=true);
+ const out=$('oc-agent');out.querySelectorAll('.suggest').forEach(n=>n.remove());
+ const [me,bot]=turn(label||q,null);bot.append(thinking());out.append(me,bot);out.scrollTop=out.scrollHeight;
+ try{const j=await api('/api/chat','POST',{message:q,session_id:ocSid,track:'oc'});ocSid=j.session_id;
+  try{localStorage.setItem('oc_sid',ocSid)}catch{}
+  bot.replaceChildren(answer(j));ocThread.push({q:label||q,reply:j.reply,actions:j.actions});ocSave();out.append(ocSuggest());out.scrollTop=out.scrollHeight;await ocLoad()}
+ catch(x){const e=el('div');e.append(el('p','err','No pude hablar con el agente: '+x.message));
+  const b=el('button','ghost chip','Reintentar');b.onclick=()=>{me.remove();bot.remove();ocBusy=false;ocAsk(q,label)};e.append(b);bot.replaceChildren(e)}
+ finally{ocBusy=false;document.querySelectorAll('#oc-view .tile,#oc-send,.ocacts button').forEach(b=>b.disabled=false)}}
+document.querySelectorAll('[data-oq]').forEach(b=>b.onclick=()=>ocAsk(OCQ[b.dataset.oq],OCLBL[b.dataset.oq]));
+$('oc-chat').onsubmit=e=>{e.preventDefault();const q=$('oc-m').value.trim();if(!q)return;$('oc-m').value='';ocAsk(q)};
 </script></body></html>
