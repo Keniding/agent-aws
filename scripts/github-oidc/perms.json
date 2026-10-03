@@ -1,0 +1,87 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "StackIncidencias",
+      "Effect": "Allow",
+      "Action": "cloudformation:*",
+      "Resource": [
+        "arn:aws:cloudformation:us-east-2:__ACCOUNT__:stack/incidencias/*",
+        "arn:aws:cloudformation:us-east-2:__ACCOUNT__:stack/incidencias-*/*"
+      ]
+    },
+    {
+      "Sid": "CfnSinRecurso",
+      "Effect": "Allow",
+      "Action": ["cloudformation:ValidateTemplate", "cloudformation:GetTemplateSummary", "cloudformation:ListStacks", "cloudformation:CreateChangeSet", "cloudformation:DescribeChangeSet"],
+      "Resource": "*"
+    },
+    {
+      "Sid": "RolesDelProyecto",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateRole", "iam:DeleteRole", "iam:GetRole", "iam:UpdateRole", "iam:UpdateAssumeRolePolicy",
+        "iam:PutRolePolicy", "iam:DeleteRolePolicy", "iam:GetRolePolicy", "iam:AttachRolePolicy",
+        "iam:DetachRolePolicy", "iam:ListRolePolicies", "iam:ListAttachedRolePolicies", "iam:TagRole", "iam:UntagRole",
+        "iam:PassRole"
+      ],
+      "Resource": "arn:aws:iam::__ACCOUNT__:role/incidencias-*"
+    },
+    {
+      "Sid": "SoloPoliticasAWSLambdaBasica",
+      "Effect": "Deny",
+      "Action": ["iam:AttachRolePolicy"],
+      "Resource": "arn:aws:iam::__ACCOUNT__:role/incidencias-*",
+      "Condition": {"ArnNotLike": {"iam:PolicyARN": "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"}}
+    },
+    {
+      "Sid": "RolVinculadoAgentCore",
+      "Effect": "Allow",
+      "Action": "iam:CreateServiceLinkedRole",
+      "Resource": "*",
+      "Condition": {"StringLike": {"iam:AWSServiceName": ["bedrock-agentcore.amazonaws.com", "runtime.bedrock-agentcore.amazonaws.com", "*.bedrock-agentcore.amazonaws.com"]}}
+    },
+    {
+      "Sid": "Lambda",
+      "Effect": "Allow",
+      "Action": "lambda:*",
+      "Resource": "arn:aws:lambda:us-east-2:__ACCOUNT__:function:incidencias-*"
+    },
+    {
+      "Sid": "LambdaSinRecurso",
+      "Effect": "Allow",
+      "Action": ["lambda:ListFunctions", "lambda:GetAccountSettings"],
+      "Resource": "*"
+    },
+    {
+      "Sid": "DynamoDB",
+      "Effect": "Allow",
+      "Action": "dynamodb:*",
+      "Resource": "arn:aws:dynamodb:us-east-2:__ACCOUNT__:table/incidencias-*"
+    },
+    {
+      "Sid": "CognitoDelProyecto",
+      "Effect": "Allow",
+      "Action": "cognito-idp:*",
+      "Resource": "*"
+    },
+    {
+      "Sid": "SecretosDeSesion",
+      "Effect": "Allow",
+      "Action": ["secretsmanager:CreateSecret", "secretsmanager:DeleteSecret", "secretsmanager:DescribeSecret", "secretsmanager:UpdateSecret", "secretsmanager:PutSecretValue", "secretsmanager:TagResource", "secretsmanager:GetRandomPassword", "secretsmanager:GetResourcePolicy"],
+      "Resource": "*"
+    },
+    {
+      "Sid": "AgentCoreHarness",
+      "Effect": "Allow",
+      "Action": "bedrock-agentcore:*",
+      "Resource": "*"
+    },
+    {
+      "Sid": "BucketDelCodigo",
+      "Effect": "Allow",
+      "Action": ["s3:CreateBucket", "s3:ListBucket", "s3:GetBucketLocation", "s3:PutObject", "s3:GetObject", "s3:DeleteObject", "s3:PutBucketPublicAccessBlock", "s3:PutEncryptionConfiguration"],
+      "Resource": ["arn:aws:s3:::agent-aws-code-__ACCOUNT__-*", "arn:aws:s3:::agent-aws-code-__ACCOUNT__-*/*"]
+    }
+  ]
+}

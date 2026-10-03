@@ -1,14 +1,24 @@
 [project]
 name = "agent-aws"
 version = "0.1.0"
-description = "Demo: web + Lambda (pay-per-use) -> AgentCore harness (pay-per-use)"
+description = "Sistema de incidencias: web + Lambda + DynamoDB + harness de AgentCore"
 readme = "README.md"
+# Explícito a propósito: sin esto, `uv lock` toma como mínimo el Python de quien lo ejecute (p. ej. 3.14) y el CI,
+# que usa el Python del runner (3.12), falla con "not compatible with the locked Python requirement".
+requires-python = ">=3.11"
 # InvokeHarness / CreateHarness only exist in recent boto3; the Lambda runtime's
 # bundled boto3 may be older, so we always vendor boto3 into the package.
 dependencies = ["boto3"]
 
 [dependency-groups]
-dev = ["pytest", "ruff"]
+dev = [
+    # Solo para el editor (autocompletado/tipos); no deben viajar dentro del zip de Lambda.
+    "boto3-stubs~=1.43.108",
+    "moto[dynamodb]>=5.2.3",
+    "playwright>=1.63.0",
+    "pytest",
+    "ruff",
+]
 
 [tool.ruff]
 line-length = 100

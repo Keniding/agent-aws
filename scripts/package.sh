@@ -4,7 +4,7 @@ set -euo pipefail
 rm -rf build && mkdir -p build/pkg
 uv export --frozen --no-dev --no-hashes --no-emit-project -o build/requirements.txt
 uv pip install --quiet --target build/pkg -r build/requirements.txt
-cp src/app.py src/index.html build/pkg/
+cp src/app.py src/auth.py src/oc.py src/oc_tools.py src/presignup.py src/index.html build/pkg/
 (cd build/pkg && python3 -m zipfile -c ../lambda.zip .)
 # Lambda runtime id = the Python uv resolved for this project
 uv run python -c 'import sys;print(f"python{sys.version_info.major}.{sys.version_info.minor}")' \

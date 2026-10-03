@@ -1,26 +1,80 @@
-"""Lambda (Function URL): serves the web page and proxies chat to an AgentCore harness."""
+"""Lambda (Function URL): web + API de incidencias; el asistente es un harness de AgentCore."""
 
 import json
 import os
 import re
+import time
 import uuid
 
 import boto3
 
+import auth
+import oc
+
 MAX_CHARS = int(os.environ.get("MAX_MESSAGE_CHARS", "2000"))
 HARNESS_NAME = os.environ["HARNESS_NAME"]
-SESSION_RE = re.compile(r"^[A-Za-z0-9_-]{33,128}$")  # harness needs >= 33 chars
+TABLE = os.environ["TABLE_NAME"]
+# InvokeHarness: runtimeSessionId de 33 a 100 caracteres y debe empezar por letra o número (API_InvokeHarness)
+SESSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{32,99}$")
+STATUSES = {"abierta", "en_curso", "resuelta"}
+# Herramientas ajenas a esta app que el harness ejecuta por su cuenta (p. ej. «@oc»: el Gateway de órdenes de cambio).
+# Solo se permiten en el módulo de órdenes de cambio; en incidencias el agente sigue limitado a las funciones en línea.
+OC_ALLOWED = [t for t in os.environ.get("OC_ALLOWED_TOOLS", "").split(",") if t]
+OC_PROMPT = (
+    "[Módulo de ÓRDENES DE CAMBIO. Usa la habilidad gestion-oc y SOLO las herramientas del gateway de órdenes de "
+    "cambio (listar_oc, consultar_oc, registrar_oc, evaluar_oc, agregar_nota_oc). No uses las herramientas de "
+    "incidencias. Tú no apruebas, programas ni cierras órdenes: eso lo hace una persona desde la web. Esta lista es "
+    "la única fuente de verdad; no inventes ids.]\n")
 
 _runtime = boto3.client("bedrock-agentcore")
 _control = boto3.client("bedrock-agentcore-control")
+_table = boto3.resource("dynamodb").Table(TABLE)
 _arn = None
 
 with open(os.path.join(os.path.dirname(__file__), "index.html"), encoding="utf-8") as f:
     PAGE = f.read()
 
+SEVERITIES = ["baja", "media", "alta", "critica"]
+MAX_STEPS = 6  # vueltas máximas del bucle agente <-> herramientas por petición
+ID_RE = re.compile(r"^[0-9a-f]{32}$")
+
+NEW_INCIDENT_PROMPT = (
+    "Ha entrado una incidencia nueva (id {id}).\nTítulo: {title}\nDescripción: {description}\n\n"
+    "Gestiónala tú: llama a clasificar_incidencia con su severidad, categoría, resumen y hasta 3 "
+    "próximos pasos. Si es crítica, llama además a cambiar_estado para ponerla en_curso. "
+    "Cuando termines, responde con una frase."
+)
+
+
+def _tool(name, description, props, required):
+    return {"type": "inline_function", "name": name, "config": {"inlineFunction": {
+        "description": description,
+        # JSON Schema directo (HarnessInlineFunctionConfig.inputSchema), sin envoltorio {"json": ...}
+        "inputSchema": {"type": "object", "properties": props, "required": required}}}}
+
+
+TOOLS = [
+    _tool("crear_incidencia", "Registra una incidencia nueva. El id lo genera el sistema: nunca se lo pidas al "
+          "usuario. Deduce título, severidad, categoría, resumen y pasos del texto del usuario y no le pidas "
+          "más datos.",
+          {"titulo": {"type": "string"}, "descripcion": {"type": "string"},
+           "severidad": {"type": "string", "enum": SEVERITIES}, "categoria": {"type": "string"},
+           "resumen": {"type": "string"}, "proximos_pasos": {"type": "array", "items": {"type": "string"}}},
+          ["titulo"]),
+    _tool("listar_incidencias", "Lista las incidencias (id, título, severidad, estado, resumen). "
+          "Sin filtro devuelve solo las no resueltas.",
+          {"estado": {"type": "string", "enum": sorted(STATUSES)}}, []),
+    _tool("clasificar_incidencia", "Guarda la clasificación de una incidencia.",
+          {"id": {"type": "string"}, "severidad": {"type": "string", "enum": SEVERITIES},
+           "categoria": {"type": "string"}, "resumen": {"type": "string"},
+           "proximos_pasos": {"type": "array", "items": {"type": "string"}}},
+          ["id", "severidad", "categoria", "resumen"]),
+    _tool("cambiar_estado", "Cambia el estado de una incidencia.",
+          {"id": {"type": "string"}, "estado": {"type": "string", "enum": sorted(STATUSES)}},
+          ["id", "estado"]),
+]
 
 def harness_arn() -> str:
-    """Resolve the harness ARN by name once per cold start."""
     global _arn
     if _arn is None:
         for page in _control.get_paginator("list_harnesses").paginate():
@@ -28,51 +82,299 @@ def harness_arn() -> str:
                 if h["harnessName"] == HARNESS_NAME:
                     _arn = h["arn"]
                     return _arn
-        raise RuntimeError(f"harness {HARNESS_NAME!r} not found; run scripts/harness.py")
+        raise RuntimeError(f"harness {HARNESS_NAME!r} no existe; ejecuta scripts/harness.py up")
     return _arn
 
 
-def ask(session_id: str, text: str) -> str:
-    resp = _runtime.invoke_harness(
-        harnessArn=harness_arn(),
-        runtimeSessionId=session_id,
-        messages=[{"role": "user", "content": [{"text": text}]}],
-    )
-    out = []
+def _when(i: dict) -> str:
+    return time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(int(i["created_at"])))
+
+
+def _short(i: dict) -> dict:
+    return {"id": i["id"], "titulo": i["title"], "severidad": i.get("severity", "sin_clasificar"),
+            "estado": i["status"], "resumen": i.get("summary", ""), "categoria": i.get("category", ""),
+            "proximos_pasos": i.get("next_steps", []), "registrada": _when(i)}
+
+
+def run_tool(name: str, args: dict) -> dict:
+    """Ejecuta una herramienta pedida por el agente. Valida todo: la entrada viene de un modelo."""
+    if name == "listar_incidencias":
+        est = args.get("estado")
+        items = list_incidents()
+        items = [i for i in items if (i["status"] == est if est in STATUSES else i["status"] != "resuelta")]
+        return {"incidencias": [_short(i) for i in items[:30]]}
+    if name == "crear_incidencia":
+        title = _text(args.get("titulo"), 200)
+        if not title:
+            raise ValueError("falta el título de la incidencia")
+        sev = args.get("severidad")
+        if sev is not None and sev not in SEVERITIES:
+            raise ValueError(f"severidad debe ser una de {SEVERITIES}")
+        steps = args.get("proximos_pasos")
+        item = new_item(title, _text(args.get("descripcion"), MAX_CHARS))
+        item.update(severity=sev or "sin_clasificar", category=_text(args.get("categoria"), 60),
+                    summary=_text(args.get("resumen"), 300),
+                    next_steps=[str(s)[:200] for s in steps][:3] if isinstance(steps, list) else [])
+        _table.put_item(Item=item)
+        return _short(item)
+    iid = str(args.get("id", ""))
+    if not ID_RE.match(iid):
+        raise ValueError("id inválido: usa exactamente un id de 32 caracteres hexadecimales tal como lo "
+                         "devuelve listar_incidencias (no inventes ni acortes ids)")
+    if name == "clasificar_incidencia":
+        sev = args.get("severidad")
+        if sev not in SEVERITIES:
+            raise ValueError(f"severidad debe ser una de {SEVERITIES}")
+        steps = args.get("proximos_pasos")
+        steps = [str(s)[:200] for s in steps][:3] if isinstance(steps, list) else []
+        r = _update(iid, "SET severity = :v, category = :c, summary = :m, next_steps = :n",
+                    {":v": sev, ":c": _text(args.get("categoria"), 60),
+                     ":m": _text(args.get("resumen"), 300), ":n": steps})
+        return _short(r)
+    if name == "cambiar_estado":
+        if args.get("estado") not in STATUSES:
+            raise ValueError(f"estado debe ser uno de {sorted(STATUSES)}")
+        return _short(_update(iid, "SET #s = :s", {":s": args["estado"]}, {"#s": "status"}))
+    raise ValueError(f"herramienta desconocida: {name}")
+
+
+def _update(iid, expr, values, names=None):
+    kw = {"ExpressionAttributeNames": names} if names else {}
+    try:
+        return _table.update_item(
+            Key={"id": iid}, UpdateExpression=expr, ConditionExpression="attribute_exists(id)",
+            ExpressionAttributeValues=values, ReturnValues="ALL_NEW", **kw)["Attributes"]
+    except _table.meta.client.exceptions.ConditionalCheckFailedException:
+        raise ValueError("la incidencia no existe") from None
+
+
+def invoke(session_id: str, messages: list, actor: str | None = None, track: str = "incidencias",
+           seen: list | None = None):
+    """Una vuelta al harness: devuelve (texto, llamadas a herramientas, motivo de parada).
+
+    `seen` (opcional) recoge los nombres de las herramientas que el propio harness ejecuta (p. ej. las del Gateway).
+    """
+    extra = {"actorId": actor} if actor else {}  # memoria a largo plazo aislada por usuario
+    if track == "oc":  # solo las herramientas del Gateway: ni las funciones de incidencias ni el shell
+        extra.update(allowedTools=OC_ALLOWED)
+    else:  # «@nombre»: solo las nuestras, sin shell
+        extra.update(tools=TOOLS, allowedTools=["@" + t["name"] for t in TOOLS])
+    resp = _runtime.invoke_harness(harnessArn=harness_arn(), runtimeSessionId=session_id, messages=messages, **extra)
+    text, calls, cur, stop = [], [], None, None
     for event in resp["stream"]:
+        tu = event.get("contentBlockStart", {}).get("start", {}).get("toolUse")
+        if tu:
+            cur = None  # solo nuestras herramientas se ejecutan aquí; las ajenas se ignoran
+            if track != "oc" and tu["name"] in {t["name"] for t in TOOLS}:
+                cur = {"id": tu["toolUseId"], "name": tu["name"], "input": ""}
+                calls.append(cur)
+            elif seen is not None and track == "oc":  # en incidencias una herramienta ajena ni se ejecuta ni se cuenta
+                seen.append(tu["name"].split("___", 1)[-1])
         delta = event.get("contentBlockDelta", {}).get("delta", {})
         if "text" in delta:
-            out.append(delta["text"])
-    return "".join(out)
+            text.append(delta["text"])
+        if "toolUse" in delta and cur is not None:
+            cur["input"] += delta["toolUse"].get("input", "")
+        if "messageStop" in event:
+            stop = event["messageStop"].get("stopReason")
+    # Nemotron emite su razonamiento antes de </think>: solo interesa la respuesta final.
+    return "".join(text).rsplit("</think>", 1)[-1].strip(), calls, stop
 
 
-def _json(status: int, body: dict) -> dict:
-    return {
-        "statusCode": status,
-        "headers": {"content-type": "application/json"},
-        "body": json.dumps(body),
-    }
+def ask(session_id: str, text: str, actor: str | None = None, track: str = "incidencias"):
+    """Bucle del agente: el harness decide, aquí se ejecutan sus herramientas. -> (respuesta, acciones)."""
+    messages, actions, reply = [{"role": "user", "content": [{"text": text}]}], [], ""
+    for _ in range(MAX_STEPS):
+        seen = []
+        reply, calls, stop = invoke(session_id, messages, actor, track, seen)
+        actions += [{"tool": n, "ok": True} for n in seen]
+        if stop != "tool_use" or not calls:
+            break
+        results = []
+        for c in calls:
+            try:
+                args = json.loads(c["input"] or "{}")
+                out, status = run_tool(c["name"], args if isinstance(args, dict) else {}), "success"
+            except Exception as exc:  # noqa: BLE001 - el error vuelve al agente para que se corrija
+                args, out, status = {}, {"error": str(exc)}, "error"
+            actions.append({"tool": c["name"], "ok": status == "success"})
+            results.append({"toolResult": {"toolUseId": c["id"], "status": status,
+                                           # solo texto: el eco con 'json' rompe el parser de boto3
+                                           "content": [{"text": json.dumps(out, default=int)}]}})
+        messages = [{"role": "user", "content": results}]
+    return reply, actions
 
 
-def handler(event, _context):
+def list_incidents() -> list:
+    """Todas las incidencias, de la más reciente a la más antigua.
+
+    Scan devuelve como máximo 1 MB por página (LastEvaluatedKey) y, por defecto, lecturas eventualmente
+    consistentes (docs de DynamoDB: bp-query-scan, WorkingWithItems). Se pagina y se pide lectura fuerte para que
+    la lista refleje lo que el agente acaba de escribir.
+    """
+    items, kw = [], {"ConsistentRead": True}
+    while True:
+        page = _table.scan(**kw)
+        items += page["Items"]
+        if "LastEvaluatedKey" not in page:
+            return sorted(items, key=lambda i: i["created_at"], reverse=True)
+        kw["ExclusiveStartKey"] = page["LastEvaluatedKey"]
+
+
+def new_item(title: str, description: str) -> dict:
+    return {"id": uuid.uuid4().hex, "title": title, "description": description,
+            "status": "abierta", "created_at": int(time.time()),
+            "severity": "sin_clasificar", "category": "", "summary": "", "next_steps": []}
+
+
+def create_incident(title: str, description: str) -> dict:
+    item = new_item(title, description)
+    _table.put_item(Item=item)  # primero se guarda: si el agente falla, la incidencia no se pierde
+    try:
+        _, actions = ask(str(uuid.uuid4()), NEW_INCIDENT_PROMPT.format(
+            id=item["id"], title=title, description=description))
+        item = _table.get_item(Key={"id": item["id"]}, ConsistentRead=True)["Item"]  # el agente acaba de escribir
+        item["actions"] = actions
+    except Exception as exc:  # noqa: BLE001
+        print("triage failed:", repr(exc))
+    return item
+
+
+def snapshot() -> str:
+    """Estado real de lo pendiente: se adjunta a cada pregunta como fuente de verdad."""
+    pend = [i for i in list_incidents() if i["status"] != "resuelta"]
+    rows = [f"- {i['id']} · {i.get('severity', 'sin_clasificar')} · {i['status']} · {i['title']} · registrada {_when(i)}"
+            for i in pend[:20]]
+    more = f"\n(y {len(pend) - 20} más)" if len(pend) > 20 else ""
+    return (f"[Estado actual de las incidencias pendientes ({len(pend)}). Es la única fuente de verdad: "
+            "ignora cualquier incidencia que recuerdes de conversaciones anteriores.]\n"
+            + ("\n".join(rows) or "(ninguna)") + more)
+
+
+def oc_snapshot() -> str:
+    """Órdenes de cambio abiertas: fuente de verdad que se adjunta a cada pregunta del módulo."""
+    abiertas = [o for o in oc.listar() if o["estado"] not in oc.TERMINALES]
+    rows = [f"- {o['id']} · {o['estado']} · {o['servicio']} · {o['titulo']}" for o in abiertas[:20]]
+    return (f"[Órdenes de cambio abiertas ({len(abiertas)}).]\n" + ("\n".join(rows) or "(ninguna)")
+            + (f"\n(y {len(abiertas) - 20} más)" if len(abiertas) > 20 else ""))
+
+
+def chat(session_id: str, message: str, actor: str | None = None, track: str = "incidencias"):
+    if track == "oc":
+        return ask(session_id, f"{OC_PROMPT}{message}\n\n{oc_snapshot()}", actor, "oc")
+    return ask(session_id, f"{message}\n\n{snapshot()}", actor)
+
+
+def _json(status: int, body) -> dict:
+    return {"statusCode": status, "headers": {"content-type": "application/json"},
+            "body": json.dumps(body, default=int)}
+
+
+def _text(value, limit) -> str:
+    return str(value or "").strip()[:limit]
+
+
+# Cabeceras recomendadas por OWASP (HTTP Headers Cheat Sheet). CSP completa (script/style) pendiente: la web
+# usa script y estilos en línea; aquí solo se fijan directivas que no los afectan.
+SECURITY_HEADERS = {
+    "x-content-type-options": "nosniff",
+    "referrer-policy": "strict-origin-when-cross-origin",
+    "x-frame-options": "DENY",
+    "content-security-policy": "frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+    "strict-transport-security": "max-age=63072000; includeSubDomains",
+    "cross-origin-opener-policy": "same-origin",
+    "cache-control": "no-store",
+}
+
+
+def handler(event, context):
+    resp = _handle(event, context)
+    resp["headers"] = {**SECURITY_HEADERS, **resp.get("headers", {})}  # lo que fije cada respuesta manda
+    return resp
+
+
+def _handle(event, _context):
     http = event["requestContext"]["http"]
-    if http["method"] == "GET":
+    method, path = http["method"], event.get("rawPath", "/")
+    if path.startswith("/auth/"):
+        return auth.route(event, method, path)
+    if auth.DISABLED:
+        user = {"name": "Modo local", "local": True}
+    elif not auth.configured():  # fallo cerrado: sin Cognito configurado no se sirve nada
+        return auth.page(503, "Autenticación no configurada", "Falta configurar Amazon Cognito.")
+    else:
+        user = auth.session(event)
+        if user is None:
+            if method == "GET" and path == "/":
+                return auth.redirect("/auth/login")
+            return _json(401, {"error": "no autenticado"})
+        if method not in ("GET", "HEAD") and not auth.same_origin(event):
+            return _json(403, {"error": "origen no permitido"})
+    if method == "GET" and path == "/api/me":
+        return _json(200, {"name": user.get("name"), "email": user.get("email", ""),
+                           "local": bool(user.get("local"))})
+    if method == "GET" and path == "/":
         return {"statusCode": 200, "headers": {"content-type": "text/html; charset=utf-8"},
                 "body": PAGE}
-    if http["method"] != "POST":
-        return _json(405, {"error": "method not allowed"})
     try:
-        data = json.loads(event.get("body") or "{}")
+        body = json.loads(event.get("body") or "{}")
     except json.JSONDecodeError:
-        return _json(400, {"error": "invalid JSON"})
-    message = str(data.get("message", "")).strip()
-    if not message or len(message) > MAX_CHARS:
-        return _json(400, {"error": f"message must be 1..{MAX_CHARS} chars"})
-    session_id = data.get("session_id") or str(uuid.uuid4())
-    if not SESSION_RE.match(session_id):
-        return _json(400, {"error": "invalid session_id"})
+        return _json(400, {"error": "JSON inválido"})
+
+    if method == "GET" and path == "/api/incidents":
+        return _json(200, list_incidents())
+
+    if method == "POST" and path == "/api/incidents":
+        title, desc = _text(body.get("title"), 200), _text(body.get("description"), MAX_CHARS)
+        if not title:
+            return _json(400, {"error": "falta el título"})
+        return _json(201, create_incident(title, desc))
+
+    # --- Órdenes de cambio (módulo aparte: no toca nada de incidencias) ---
+    quien = user.get("email") or user.get("name") or "usuario"
     try:
-        return _json(200, {"session_id": session_id, "reply": ask(session_id, message)})
-    except Exception as exc:  # noqa: BLE001 - demo: expose only the error class
-        print("invoke failed:", repr(exc))
-        return _json(502, {"error": type(exc).__name__})
+        if method == "GET" and path == "/api/oc":
+            return _json(200, oc.listar())
+        if method == "POST" and path == "/api/oc":
+            return _json(201, oc.crear(body, quien))
+        m = re.fullmatch(r"/api/oc/([0-9a-f]{32})/(evaluar|mover|nota)", path)
+        if method == "POST" and m:
+            oc_id, accion = m.groups()
+            if accion == "evaluar":
+                return _json(200, oc.evaluar(oc_id, body, quien))
+            if accion == "nota":
+                return _json(200, oc.nota(oc_id, body.get("nota"), quien))
+            return _json(200, oc.mover(oc_id, body.get("a"), quien, body.get("nota")))
+    except oc.OcError as exc:
+        return _json(400, {"error": str(exc)})
+
+    m = re.fullmatch(r"/api/incidents/([0-9a-f]{32})", path)
+    if method == "PATCH" and m:
+        if body.get("status") not in STATUSES:
+            return _json(400, {"error": f"status debe ser uno de {sorted(STATUSES)}"})
+        try:
+            r = _table.update_item(
+                Key={"id": m.group(1)}, UpdateExpression="SET #s = :s",
+                ConditionExpression="attribute_exists(id)",
+                ExpressionAttributeNames={"#s": "status"},
+                ExpressionAttributeValues={":s": body["status"]}, ReturnValues="ALL_NEW")
+        except _table.meta.client.exceptions.ConditionalCheckFailedException:
+            return _json(404, {"error": "no existe"})
+        return _json(200, r["Attributes"])
+
+    if method == "POST" and path == "/api/chat":
+        message = _text(body.get("message"), MAX_CHARS + 1)
+        if not message or len(message) > MAX_CHARS:
+            return _json(400, {"error": f"el mensaje debe tener 1..{MAX_CHARS} caracteres"})
+        sid = body.get("session_id") or str(uuid.uuid4())
+        if not SESSION_RE.match(sid):
+            return _json(400, {"error": "session_id inválido"})
+        try:
+            track = "oc" if body.get("track") == "oc" and OC_ALLOWED else "incidencias"
+            reply, actions = chat(sid, message, user.get("sub"), track)
+            return _json(200, {"session_id": sid, "reply": reply, "actions": actions})
+        except Exception as exc:  # noqa: BLE001 - solo exponemos la clase del error
+            print("chat failed:", repr(exc))
+            return _json(502, {"error": type(exc).__name__})
+
+    return _json(404, {"error": "no encontrado"})

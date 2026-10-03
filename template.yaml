@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: Demo - Lambda Function URL (web+API) in front of an AgentCore harness
+Description: Sistema de incidencias - Lambda Function URL (web+API), DynamoDB y harness de AgentCore
 
 Parameters:
   LambdaRuntime:
@@ -7,16 +7,151 @@ Parameters:
     Description: Lambda runtime id matching the Python that built the package (derived in CI)
   HarnessName:
     Type: String
-    Default: agent_aws_demo
-  ModelId:
-    Type: String
-    Description: Bedrock model / inference-profile id the harness may invoke
+    Default: asistente_incidencias
   CodeBucket:
     Type: String
   CodeKey:
     Type: String
+  AllowedSignups:
+    Type: String
+    Default: ""
+    Description: >-
+      Correos («ana@empresa.com») o dominios («@empresa.com») que pueden registrarse solos, separados por
+      comas. Vacío = nadie se registra por su cuenta (solo usuarios dados de alta por un administrador).
 
 Resources:
+  IncidentsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{AttributeName: id, AttributeType: S}]
+      KeySchema: [{AttributeName: id, KeyType: HASH}]
+      PointInTimeRecoverySpecification: {PointInTimeRecoveryEnabled: true}
+
+  # --- Órdenes de cambio: tabla propia, herramientas serverless (Lambda) y AgentCore Gateway (MCP) ---
+  ChangeOrdersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{AttributeName: id, AttributeType: S}]
+      KeySchema: [{AttributeName: id, KeyType: HASH}]
+      PointInTimeRecoverySpecification: {PointInTimeRecoveryEnabled: true}
+
+  OcToolsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - {Effect: Allow, Principal: {Service: lambda.amazonaws.com}, Action: "sts:AssumeRole"}
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      Policies:
+        - PolicyName: orders-table
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:  # sin DeleteItem: ni el agente ni nadie borra órdenes; solo se cierran
+              - Effect: Allow
+                Action: [dynamodb:Scan, dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem]
+                Resource: !GetAtt ChangeOrdersTable.Arn
+  OcToolsFunction:  # mismo paquete de código que la app, otro manejador
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: !Ref LambdaRuntime
+      Handler: oc_tools.handler
+      Role: !GetAtt OcToolsRole.Arn
+      Timeout: 15
+      MemorySize: 256
+      Code: {S3Bucket: !Ref CodeBucket, S3Key: !Ref CodeKey}
+      Environment:
+        Variables: {OC_TABLE_NAME: !Ref ChangeOrdersTable}
+
+  OcGatewayRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: bedrock-agentcore.amazonaws.com}
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals: {"aws:SourceAccount": !Ref AWS::AccountId}
+              ArnLike: {"aws:SourceArn": !Sub "arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:gateway/*"}
+      Policies:
+        - PolicyName: invoke-oc-tools
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - {Effect: Allow, Action: "lambda:InvokeFunction", Resource: !GetAtt OcToolsFunction.Arn}
+  OcGateway:  # entrada IAM: solo el rol del harness puede llamarlo (bedrock-agentcore:InvokeGateway)
+    Type: AWS::BedrockAgentCore::Gateway
+    Properties:
+      Name: !Sub "${AWS::StackName}-oc"
+      Description: Herramientas de órdenes de cambio para el agente
+      ProtocolType: MCP
+      AuthorizerType: AWS_IAM
+      RoleArn: !GetAtt OcGatewayRole.Arn
+  OcGatewayTarget:
+    Type: AWS::BedrockAgentCore::GatewayTarget
+    Properties:
+      GatewayIdentifier: !GetAtt OcGateway.GatewayIdentifier
+      Name: oc
+      Description: Registrar, consultar, evaluar y anotar órdenes de cambio
+      CredentialProviderConfigurations: [{CredentialProviderType: GATEWAY_IAM_ROLE}]
+      TargetConfiguration:
+        Mcp:
+          Lambda:
+            LambdaArn: !GetAtt OcToolsFunction.Arn
+            ToolSchema:
+              InlinePayload:
+                - Name: listar_oc
+                  Description: Lista las órdenes de cambio (id, título, tipo, servicio, estado, riesgo). Sin filtro devuelve todas.
+                  InputSchema:
+                    Type: object
+                    Properties:
+                      estado: {Type: string, Description: "Filtra por estado: solicitada, evaluada, aprobada, programada, ejecutada, verificada, rechazada, cancelada o revertida"}
+                - Name: consultar_oc
+                  Description: Devuelve una orden con su evaluación y su historial. Usa un id de 32 caracteres devuelto por listar_oc.
+                  InputSchema:
+                    Type: object
+                    Properties:
+                      id: {Type: string, Description: "Id de la orden (32 caracteres)"}
+                    Required: [id]
+                - Name: registrar_oc
+                  Description: Registra una solicitud de cambio nueva en estado solicitada. No ejecuta ningún cambio en AWS. El id lo genera el sistema.
+                  InputSchema:
+                    Type: object
+                    Properties:
+                      titulo: {Type: string, Description: "Título corto del cambio"}
+                      tipo: {Type: string, Description: "modificar_valor (cambiar un valor existente) o nuevo_recurso (pedir un recurso nuevo)"}
+                      servicio: {Type: string, Description: "Servicio de AWS afectado, p. ej. Lambda o DynamoDB"}
+                      recurso: {Type: string, Description: "Nombre o ARN del recurso afectado"}
+                      parametro: {Type: string, Description: "Parámetro que cambia (obligatorio en modificar_valor)"}
+                      valor_actual: {Type: string, Description: "Valor actual, si se conoce"}
+                      valor_propuesto: {Type: string, Description: "Valor nuevo (obligatorio en modificar_valor)"}
+                      justificacion: {Type: string, Description: "Por qué hace falta el cambio"}
+                    Required: [titulo, tipo, servicio]
+                - Name: evaluar_oc
+                  Description: Evalúa una orden solicitada (pasa a evaluada). Exige riesgo, impacto, plan y vuelta atrás. No aprueba la orden.
+                  InputSchema:
+                    Type: object
+                    Properties:
+                      id: {Type: string, Description: "Id de la orden (32 caracteres)"}
+                      riesgo: {Type: string, Description: "baja, media o alta"}
+                      impacto: {Type: string, Description: "Qué se afecta y cuánto dura"}
+                      plan: {Type: string, Description: "Cómo se ejecutaría el cambio, en pasos cortos"}
+                      rollback: {Type: string, Description: "Cómo se vuelve atrás si sale mal"}
+                    Required: [id, riesgo, impacto, plan, rollback]
+                - Name: agregar_nota_oc
+                  Description: Añade una nota al historial de una orden sin cambiar su estado.
+                  InputSchema:
+                    Type: object
+                    Properties:
+                      id: {Type: string, Description: "Id de la orden (32 caracteres)"}
+                      nota: {Type: string, Description: "Texto de la nota"}
+                    Required: [id, nota]
+
   HarnessRole:
     Type: AWS::IAM::Role
     Properties:
@@ -28,19 +163,61 @@ Resources:
             Action: sts:AssumeRole
             Condition:
               StringEquals: {"aws:SourceAccount": !Ref AWS::AccountId}
-              ArnLike: {"aws:SourceArn": !Sub "arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:harness/*"}
+              ArnLike: {"aws:SourceArn": !Sub "arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:*"}
       Policies:
         - PolicyName: harness
           PolicyDocument:
             Version: "2012-10-17"
+            # Subconjunto de AmazonBedrockAgentCoreHarnessExecutionPolicy (la que crea la consola) y de la política de
+            # ejemplo de la documentación (harness-security); se omiten navegador, intérprete de código, EFS y S3 Files.
             Statement:
-              # Starting point; refine against the "harness-security" doc page for your features.
               - Effect: Allow
                 Action: [bedrock:InvokeModel, bedrock:InvokeModelWithResponseStream]
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
+                  - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:*"
+              - Effect: Allow
+                Action: bedrock-mantle:CreateInference
+                Resource: !Sub "arn:${AWS::Partition}:bedrock-mantle:${AWS::Region}:${AWS::AccountId}:*"
+              - Effect: Allow
+                Action: [bedrock-mantle:CallWithBearerToken, sts:GetServiceBearerToken,
+                         ecr-public:GetAuthorizationToken, ecr:GetAuthorizationToken,
+                         xray:PutTraceSegments, xray:PutTelemetryRecords,
+                         xray:GetSamplingRules, xray:GetSamplingTargets]
                 Resource: "*"
               - Effect: Allow
-                Action: [logs:CreateLogGroup, logs:CreateLogStream, logs:PutLogEvents]
-                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/bedrock-agentcore/*"
+                Action: [ecr:BatchGetImage, ecr:GetDownloadUrlForLayer, ecr:BatchCheckLayerAvailability]
+                Resource: !Sub "arn:${AWS::Partition}:ecr:${AWS::Region}:*:repository/harness-*"
+              - Effect: Allow
+                Action: [logs:CreateLogGroup, logs:DescribeLogStreams, logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/bedrock-agentcore/runtimes/*"
+              - Effect: Allow
+                Action: [logs:DescribeLogGroups, logs:PutResourcePolicy]
+                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:*"
+              - Effect: Allow
+                Action: cloudwatch:PutMetricData
+                Resource: "*"
+                Condition: {StringEquals: {"cloudwatch:namespace": bedrock-agentcore}}
+              - Effect: Allow  # memoria de sesión (activa por defecto en los harness creados por API)
+                Action: [bedrock-agentcore:CreateEvent, bedrock-agentcore:DeleteEvent,
+                         bedrock-agentcore:GetEvent, bedrock-agentcore:ListEvents,
+                         bedrock-agentcore:RetrieveMemoryRecords]
+                Resource: !Sub "arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:memory/${HarnessName}-*"
+              - Effect: Allow  # herramientas de órdenes de cambio: solo este gateway
+                Action: bedrock-agentcore:InvokeGateway
+                Resource: !GetAtt OcGateway.GatewayArn
+              - Effect: Allow  # habilidades (SKILL.md) desde el bucket de código, solo el prefijo skills/
+                Action: s3:GetObject
+                Resource: !Sub "arn:${AWS::Partition}:s3:::${CodeBucket}/skills/*"
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !Sub "arn:${AWS::Partition}:s3:::${CodeBucket}"
+                Condition: {StringLike: {"s3:prefix": "skills/*"}}
+              - Effect: Allow
+                Action: [bedrock-agentcore:GetWorkloadAccessToken,bedrock-agentcore:GetWorkloadAccessTokenForJWT]
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:workload-identity-directory/default"
+                  - !Sub "arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:workload-identity-directory/default/workload-identity/*"
 
   FunctionRole:
     Type: AWS::IAM::Role
@@ -60,10 +237,105 @@ Resources:
             Statement:
               - Effect: Allow
                 Action: [bedrock-agentcore:InvokeHarness, bedrock-agentcore:InvokeAgentRuntime]
-                Resource: "*"
+                # Según la documentación (harness-security): InvokeHarness exige ambas acciones sobre el ARN del harness
+                Resource: !Sub "arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:harness/${HarnessName}-*"
               - Effect: Allow
                 Action: bedrock-agentcore:ListHarnesses
                 Resource: "*"
+              - Effect: Allow
+                Action: [dynamodb:Scan, dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem]
+                Resource: !GetAtt IncidentsTable.Arn
+              - Effect: Allow  # órdenes de cambio (la web las lista y las mueve de estado; nunca se borran)
+                Action: [dynamodb:Scan, dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem]
+                Resource: !GetAtt ChangeOrdersTable.Arn
+              - Effect: Allow  # autenticación: clave de firma de la sesión y descubrimiento del cliente
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref SessionSecret
+              - Effect: Allow
+                Action: cognito-idp:ListUserPoolClients
+                Resource: !GetAtt UserPool.Arn
+
+  # --- Autenticación: Amazon Cognito (solo AWS). Los usuarios los da de alta un administrador. ---
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub "${AWS::StackName}-usuarios"
+      UsernameAttributes: [email]
+      AutoVerifiedAttributes: [email]
+      LambdaConfig:
+        PreSignUp: !GetAtt PreSignUpFunction.Arn  # el registro propio solo vale para correos autorizados
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: false  # registro propio con código por correo, filtrado por AllowedSignups
+        InviteMessageTemplate:
+          EmailSubject: Acceso a Incidencias
+          EmailMessage: "Hola. Tu usuario es {username} y tu contraseña temporal es {####}. Entra y elige una nueva."
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 12
+          RequireLowercase: true
+          RequireUppercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+          TemporaryPasswordValidityDays: 7
+      MfaConfiguration: "OFF"
+      AccountRecoverySetting:
+        RecoveryMechanisms: [{Name: verified_email, Priority: 1}]
+  PreSignUpRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - {Effect: Allow, Principal: {Service: lambda.amazonaws.com}, Action: "sts:AssumeRole"}
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+  PreSignUpFunction:  # mismo paquete de código que la app, otro manejador
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: !Ref LambdaRuntime
+      Handler: presignup.handler
+      Role: !GetAtt PreSignUpRole.Arn
+      Timeout: 5
+      MemorySize: 128
+      Code: {S3Bucket: !Ref CodeBucket, S3Key: !Ref CodeKey}
+      Environment:
+        Variables: {ALLOWED_SIGNUPS: !Ref AllowedSignups}
+  PreSignUpPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref PreSignUpFunction
+      Action: lambda:InvokeFunction
+      Principal: cognito-idp.amazonaws.com
+      SourceArn: !Sub "arn:${AWS::Partition}:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/*"
+  UserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain: !Sub "incidencias-${AWS::AccountId}"
+      UserPoolId: !Ref UserPool
+  UserPoolClient:  # público + PKCE: no hay secreto que guardar
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: incidencias-web
+      UserPoolId: !Ref UserPool
+      GenerateSecret: false
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthFlows: [code]
+      AllowedOAuthScopes: [openid, email, profile]
+      SupportedIdentityProviders: [COGNITO]
+      CallbackURLs: [!Sub "${Url.FunctionUrl}auth/callback"]
+      LogoutURLs: [!Sub "${Url.FunctionUrl}auth/signed-out"]
+      ExplicitAuthFlows: [ALLOW_USER_SRP_AUTH, ALLOW_REFRESH_TOKEN_AUTH]
+      PreventUserExistenceErrors: ENABLED
+      EnableTokenRevocation: true
+  SessionSecret:  # clave HMAC que firma la cookie de sesión
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: Clave de firma de la sesión de Incidencias
+      GenerateSecretString:
+        SecretStringTemplate: "{}"
+        GenerateStringKey: session_key
+        PasswordLength: 48
+        ExcludePunctuation: true
 
   Function:
     Type: AWS::Lambda::Function
@@ -71,17 +343,24 @@ Resources:
       Runtime: !Ref LambdaRuntime
       Handler: app.handler
       Role: !GetAtt FunctionRole.Arn
-      Timeout: 120
+      Timeout: 240
       MemorySize: 256
       Code: {S3Bucket: !Ref CodeBucket, S3Key: !Ref CodeKey}
       Environment:
-        Variables: {HARNESS_NAME: !Ref HarnessName}
+        Variables:
+          HARNESS_NAME: !Ref HarnessName
+          TABLE_NAME: !Ref IncidentsTable
+          OC_TABLE_NAME: !Ref ChangeOrdersTable
+          OC_ALLOWED_TOOLS: "@oc,@builtin/skills"  # «@oc»: gateway que añade scripts/harness.py; «@builtin/skills»: cargar SKILL.md (sin esto el agente no usa la habilidad)
+          COGNITO_POOL_ID: !Ref UserPool
+          COGNITO_DOMAIN: !Ref UserPoolDomain
+          SESSION_SECRET_ARN: !Ref SessionSecret
 
   Url:
     Type: AWS::Lambda::Url
     Properties:
       TargetFunctionArn: !GetAtt Function.Arn
-      AuthType: NONE # public demo; add AWS_IAM or CloudFront+WAF before real use
+      AuthType: NONE # la URL es pública, pero la app exige sesión de Cognito (src/auth.py) y falla cerrada
   UrlPermission:
     Type: AWS::Lambda::Permission
     Properties:
@@ -99,4 +378,7 @@ Resources:
 
 Outputs:
   HarnessRoleArn: {Value: !GetAtt HarnessRole.Arn}
+  OcGatewayArn: {Value: !GetAtt OcGateway.GatewayArn}
+  SkillsUri: {Value: !Sub "s3://${CodeBucket}/skills/"}
   WebUrl: {Value: !GetAtt Url.FunctionUrl}
+  UserPoolId: {Value: !Ref UserPool}

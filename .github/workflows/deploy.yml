@@ -1,7 +1,8 @@
 name: deploy
 on:
-  push:
-    branches: [main]
+  # Solo manual (Actions -> deploy -> Run workflow). Para desplegar al hacer push a main, añade:
+  #   push: {branches: [main]}
+  # cuando AWS_ROLE_ARN, AWS_REGION y ALLOWED_SIGNUPS estén configurados.
   workflow_dispatch:
 concurrency: deploy
 permissions:
@@ -9,8 +10,8 @@ permissions:
   contents: read
 env:
   AWS_REGION: ${{ vars.AWS_REGION }}
-  STACK: agent-aws-demo
-  HARNESS_NAME: agent_aws_demo
+  STACK: incidencias
+  HARNESS_NAME: asistente_incidencias
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -22,6 +23,7 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
       - run: uv sync --frozen
+      - run: uv run playwright install --with-deps chromium
       - run: uv run pytest -q
       - run: ./scripts/package.sh
       - name: Upload code
@@ -32,18 +34,25 @@ jobs:
             aws s3 mb "s3://$BUCKET" --region "$AWS_REGION"
           KEY="lambda-${GITHUB_SHA}.zip"
           aws s3 cp build/lambda.zip "s3://$BUCKET/$KEY"
+          # Habilidades del agente (SKILL.md): el harness las lee de S3 con su rol de ejecución
+          aws s3 sync skills "s3://$BUCKET/skills/" --delete
           echo "BUCKET=$BUCKET" >> "$GITHUB_ENV"; echo "KEY=$KEY" >> "$GITHUB_ENV"
       - name: Deploy stack
         run: |
           aws cloudformation deploy --stack-name "$STACK" --template-file template.yaml \
             --capabilities CAPABILITY_IAM --no-fail-on-empty-changeset \
             --parameter-overrides LambdaRuntime="$(cat build/runtime.txt)" \
-              ModelId="${{ vars.MODEL_ID }}" HarnessName="$HARNESS_NAME" \
-              CodeBucket="$BUCKET" CodeKey="$KEY"
+              HarnessName="$HARNESS_NAME" \
+              CodeBucket="$BUCKET" CodeKey="$KEY" \
+              AllowedSignups="${{ vars.ALLOWED_SIGNUPS }}"
       - name: Create/update harness
         run: |
           export HARNESS_ROLE_ARN=$(aws cloudformation describe-stacks --stack-name "$STACK" \
             --query "Stacks[0].Outputs[?OutputKey=='HarnessRoleArn'].OutputValue" --output text)
+          export OC_GATEWAY_ARN=$(aws cloudformation describe-stacks --stack-name "$STACK" \
+            --query "Stacks[0].Outputs[?OutputKey=='OcGatewayArn'].OutputValue" --output text)
+          export SKILLS_URI=$(aws cloudformation describe-stacks --stack-name "$STACK" \
+            --query "Stacks[0].Outputs[?OutputKey=='SkillsUri'].OutputValue" --output text)
           MODEL_ID="${{ vars.MODEL_ID }}" uv run scripts/harness.py up
       - name: URL
         run: aws cloudformation describe-stacks --stack-name "$STACK" --query "Stacks[0].Outputs[?OutputKey=='WebUrl'].OutputValue" --output text
