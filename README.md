@@ -132,3 +132,8 @@ categoría, resumen y pasos. La incidencia nueva aparece resaltada en la lista.
   control segmentado.
 - **Móvil:** una columna con la lista primero y el agente debajo.
 - Las pruebas de navegador fijan este comportamiento (columnas, panel sin desbordar la pantalla, orden en móvil).
+
+### Botón flotante «Hablar con el agente» (móvil)
+En pantallas de una columna aparece abajo a la derecha mientras el agente está fuera de la vista; al pulsarlo baja
+hasta el panel y deja el cursor en el campo de escribir, y se retira (no existe en escritorio). Sube lo justo cuando
+hay un aviso para no taparlo. Se llama distinto de «Preguntar al agente» (el de cada tarjeta, que consulta esa incidencia).

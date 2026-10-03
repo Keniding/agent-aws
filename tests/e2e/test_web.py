@@ -326,3 +326,48 @@ def test_on_phones_the_list_comes_first(browser, base_url):
     assert box(pg, ".col")["y"] < box(pg, "#agentcard")["y"]
     assert pg.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
     ctx.close()
+
+
+def phone(browser, base_url):
+    ctx = browser.new_context(viewport={"width": 390, "height": 844})
+    pg = ctx.new_page()
+    pg.route("**/fonts.googleapis.com/**", lambda r: r.abort())
+    pg.goto(base_url)
+    return ctx, pg
+
+
+def test_floating_button_takes_you_to_the_agent_on_phones(browser, base_url, page):
+    for n in range(6):  # `page` vacía la tabla; el relleno alarga la lista para que el agente quede lejos
+        mk(page, f"Incidencia de relleno {n}")
+    ctx, pg = phone(browser, base_url)
+    pg.locator("article.inc").nth(5).wait_for()
+    fab = pg.get_by_role("button", name="Hablar con el agente")
+    fab.wait_for(state="visible")  # el agente está debajo de la lista: fuera de la vista
+    b = fab.bounding_box()
+    assert b["x"] + b["width"] > 350 and b["y"] > 700  # abajo a la derecha, no tapa la lista
+    fab.click()
+    pg.wait_for_function("document.activeElement && document.activeElement.id==='m'")
+    inview = pg.evaluate("(()=>{const r=document.querySelector('#agentcard').getBoundingClientRect();"
+                         "return r.top<window.innerHeight&&r.bottom>0})()")
+    assert inview
+    pg.locator("#fab").wait_for(state="hidden")  # ya estás en el agente: el botón se retira
+    ctx.close()
+
+
+def test_floating_button_does_not_exist_on_wide_screens(page):
+    page.set_viewport_size({"width": 1440, "height": 800})
+    assert not page.locator("#fab").is_visible()  # el agente ya está siempre a la vista
+
+
+def test_floating_button_moves_up_when_a_notice_is_shown(browser, base_url, page):
+    for n in range(6):  # lista larga: el agente queda fuera de la vista y el botón visible
+        mk(page, f"Error de impresora {n}")
+    ctx, pg = phone(browser, base_url)
+    pg.locator("article.inc").first.wait_for()
+    pg.locator("#fab").wait_for(state="visible")
+    base = pg.locator("#fab").bounding_box()["y"]
+    pg.get_by_role("button", name="Empezar a atender").first.click()
+    pg.locator("#toast").wait_for(state="visible")
+    toast, fab = pg.locator("#toast").bounding_box(), pg.locator("#fab").bounding_box()
+    assert fab["y"] + fab["height"] <= toast["y"] + 1 and fab["y"] < base  # no se solapan
+    ctx.close()
