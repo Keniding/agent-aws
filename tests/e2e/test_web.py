@@ -393,3 +393,33 @@ def test_logout_button_posts_and_follows_the_returned_url(page, base_url):
     btn.click()
     page.wait_for_url("**/?cerrada=1")
     assert seen == ["POST"]
+
+
+def _luminance(rgb):
+    def f(c):
+        c /= 255
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+    r, g, b = rgb
+    return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b)
+
+
+def _ratio(a, b):
+    hi, lo = sorted((_luminance(a), _luminance(b)), reverse=True)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+@pytest.mark.parametrize("theme", ["light", "dark", "contrast"])
+def test_small_header_text_meets_wcag_aa_contrast(page, theme):
+    """WCAG 1.4.3: el texto pequeño de la cabecera (lema, usuario, «Tema») necesita ≥ 4,5:1 sobre el terracota."""
+    import json
+
+    page.route("**/api/me", lambda r: r.fulfill(status=200, content_type="application/json",
+                                                body=json.dumps({"name": "Ana", "email": "ana@x.com", "local": False})))
+    page.get_by_role("button", name={"light": "Papel", "dark": "Tinta", "contrast": "Alto contraste"}[theme]).click()
+    page.reload()
+    page.locator("#who").wait_for(state="visible")
+    parse = (r"el => { const m = s => s.match(/[\d.]+/g).slice(0, 3).map(Number);"
+             " const cs = getComputedStyle(el); return [m(cs.color), m(getComputedStyle(document.querySelector('header')).backgroundColor)] }")
+    for selector in ("header p", "#who", ".themes .label"):
+        fg, bg = page.locator(selector).first.evaluate(parse)
+        assert _ratio(fg, bg) >= 4.5, f"{selector}: {_ratio(fg, bg):.2f}:1"

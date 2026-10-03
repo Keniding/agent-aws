@@ -235,3 +235,18 @@ def test_security_headers_are_on_every_response(secured):
 def test_local_mode_has_no_login(app):
     r = app.handler(ev("GET", "/api/me"), None)
     assert json.loads(r["body"])["local"] is True
+
+
+@pytest.mark.parametrize("state", ["estado-ñ", "💥", "a" * 5000, "\x00", "%00", "<script>"])
+def test_hostile_state_values_are_rejected_without_crashing(secured, state):
+    """hmac.compare_digest con str no admite no-ASCII: un `state` raro no debe producir un 500."""
+    cookie, _, _ = login(secured)
+    r = secured.handler(ev("GET", "/auth/callback", cookies=[cookie], query={"code": "abc", "state": state}), None)
+    assert r["statusCode"] == 403
+
+
+def test_hostile_session_and_login_cookies_never_crash(secured):
+    for value in ("ñ.ñ", "💥", "a.b.c", "." * 50, "x" * 8000, "éé"):
+        for name in (auth.SESSION_COOKIE, auth.LOGIN_COOKIE):
+            r = secured.handler(ev("GET", "/api/incidents", cookies=[f"{name}={value}"]), None)
+            assert r["statusCode"] == 401

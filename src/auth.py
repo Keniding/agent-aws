@@ -58,6 +58,13 @@ def client_id() -> str:
     return _client_id_cache
 
 
+def _same(a, b) -> bool:
+    """Comparación en tiempo constante (evita ataques de temporización). `hmac.compare_digest` con `str` solo
+    admite ASCII y lanza TypeError con otros caracteres (docs de Python): como `state` viene de la URL, se compara
+    sobre bytes para que cualquier entrada sea un simple «no coincide»."""
+    return hmac.compare_digest(str(a).encode("utf-8"), str(b).encode("utf-8"))
+
+
 def _b64(raw: bytes) -> str:
     return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
 
@@ -79,7 +86,7 @@ def verify(token: str):
     """Devuelve el contenido si la firma es válida y no ha caducado; si no, None."""
     try:
         body, mac = token.split(".")
-        if not hmac.compare_digest(mac, _mac(body)):
+        if not _same(mac, _mac(body)):
             return None
         data = json.loads(_unb64(body))
         return data if data["exp"] > time.time() else None
@@ -171,7 +178,7 @@ def _denied(msg="No se pudo iniciar sesión.") -> dict:
 def _callback(event) -> dict:
     q = event.get("queryStringParameters") or {}
     ticket = verify(_cookies(event).get(LOGIN_COOKIE, ""))
-    if not ticket or not q.get("state") or not hmac.compare_digest(q["state"], ticket["s"]):
+    if not ticket or not q.get("state") or not _same(q["state"], ticket["s"]):
         return _denied("La solicitud de inicio de sesión no es válida o caducó.")
     if q.get("error") or not q.get("code"):
         return _denied("El inicio de sesión no se completó.")
@@ -183,7 +190,7 @@ def _callback(event) -> dict:
         return _denied()
     ok = (claims.get("iss") == f"https://cognito-idp.{REGION}.amazonaws.com/{POOL_ID}"
           and claims.get("aud") == client_id() and claims.get("token_use") == "id"
-          and hmac.compare_digest(str(claims.get("nonce", "")), ticket["n"])
+          and _same(claims.get("nonce", ""), ticket["n"])
           and claims.get("exp", 0) > time.time())
     if not ok:
         return _denied()

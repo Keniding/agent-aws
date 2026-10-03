@@ -42,13 +42,17 @@ body{margin:0;background:var(--surface);color:var(--ink);font:400 16px/26px var(
 [hidden]{display:none!important}
 
 /* Cabecera compacta: marca a la izquierda; usuario y tema a la derecha */
-header{background:var(--accent-field);color:var(--color-carbon-ink);padding:var(--space-2) var(--space-8);
+/* Texto pequeño de la cabecera (WCAG 1.4.3, mínimo 4,5:1): negro sobre #cc5a3f = 5,10:1; en alto contraste el fondo es #b54832 y el hueso da 4,77:1 */
+:root{--on-header:#000}
+:root[data-theme=contrast]{--on-header:#f5f2eb}
+@media(prefers-contrast:more){:root[data-theme=auto]{--on-header:#f5f2eb}}
+header{background:var(--accent-field);color:var(--on-header);padding:var(--space-2) var(--space-8);
  display:flex;align-items:center;justify-content:space-between;gap:var(--space-2) var(--space-4);flex-wrap:wrap;
  border-bottom:1px solid var(--rule)}
 .brand{display:flex;align-items:baseline;gap:var(--space-1) var(--space-4);flex-wrap:wrap}
 header h1{font:500 32px/40px var(--display);letter-spacing:-.01em;margin:0;color:var(--on-accent-field)}
 header h1 span{color:var(--color-carbon-ink)}
-header p{font:italic 400 17px/24px var(--display);margin:0;color:var(--on-accent-field)}
+header p{font:italic 400 17px/24px var(--display);margin:0;color:var(--on-header)}
 .bar{display:flex;align-items:center;gap:var(--space-2) var(--space-4);flex-wrap:wrap}
 .user{display:flex;align-items:center;gap:var(--space-2);font:600 14px/20px var(--sans)}
 header .themes button,header .user button{min-height:32px;padding:4px 10px;font-size:11px;line-height:16px;border-radius:0;
