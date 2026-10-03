@@ -25,7 +25,7 @@ Ninguna fijada a mano: `uv.lock` las resuelve (boto3 va dentro del zip porque el
 GitHub usan los últimos tags existentes al crear el repo.
 
 ## Puesta en marcha
-1. Rol IAM OIDC para GitHub (confía en `token.actions.githubusercontent.com`, repo `Keniding/agent-aws`) con
+1. Rol IAM OIDC para GitHub: `bash scripts/github-oidc/setup.sh` lo crea (revisa antes `trust.json` y `perms.json`) y guarda `AWS_ROLE_ARN`. Confía en `token.actions.githubusercontent.com`, repo `Keniding/agent-aws` (solo `main` y la rama de trabajo), con
    permisos sobre CloudFormation, IAM, Lambda, DynamoDB, S3, Cognito, Secrets Manager y `bedrock-agentcore:*`.
 2. Modelo: por defecto `nvidia.nemotron-nano-9b-v2` vía Bedrock Mantle (`chat_completions`), el mismo que usa el playground y que no requiere suscripción de Marketplace. Para otro, variables `MODEL_ID` y `API_FORMAT`.
 3. GitHub → Settings: secret `AWS_ROLE_ARN`; variables `AWS_REGION` y `MODEL_ID`.
