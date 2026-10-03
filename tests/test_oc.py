@@ -144,7 +144,7 @@ def test_tool_prefix_is_stripped_whatever_the_target_name(app):
 def test_oc_chat_only_allows_gateway_tools_and_reports_them(app):
     status, out = call(app, "POST", "/api/chat", {"message": "¿qué órdenes hay?", "track": "oc"})
     assert status == 200 and out["actions"] == [{"tool": "listar_oc", "ok": True}]
-    assert app._runtime.last_allowed == ["@oc"]  # ni funciones de incidencias ni shell
+    assert app._runtime.last_allowed == ["@oc", "@builtin/skills"]  # gateway y habilidad: ni funciones de incidencias ni shell
     call(app, "POST", "/api/chat", {"message": "hola"})
     assert "@oc" not in app._runtime.last_allowed  # en incidencias el Gateway de OC no está permitido
 

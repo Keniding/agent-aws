@@ -351,7 +351,7 @@ Resources:
           HARNESS_NAME: !Ref HarnessName
           TABLE_NAME: !Ref IncidentsTable
           OC_TABLE_NAME: !Ref ChangeOrdersTable
-          OC_ALLOWED_TOOLS: "@oc"  # nombre de la herramienta «agentcore_gateway» que scripts/harness.py añade al harness
+          OC_ALLOWED_TOOLS: "@oc,@builtin/skills"  # «@oc»: gateway que añade scripts/harness.py; «@builtin/skills»: cargar SKILL.md (sin esto el agente no usa la habilidad)
           COGNITO_POOL_ID: !Ref UserPool
           COGNITO_DOMAIN: !Ref UserPoolDomain
           SESSION_SECRET_ARN: !Ref SessionSecret

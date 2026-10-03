@@ -118,7 +118,7 @@ def build_app():
 
     os.environ.update(AWS_DEFAULT_REGION="us-east-1", AWS_ACCESS_KEY_ID="x",
                       AWS_SECRET_ACCESS_KEY="x", HARNESS_NAME="local", TABLE_NAME="incidencias",
-                      OC_TABLE_NAME="ordenes", OC_ALLOWED_TOOLS="@oc", AUTH_DISABLED="1")
+                      OC_TABLE_NAME="ordenes", OC_ALLOWED_TOOLS="@oc,@builtin/skills", AUTH_DISABLED="1")
     mock = mock_aws()
     mock.start()
     for name in ("incidencias", "ordenes"):

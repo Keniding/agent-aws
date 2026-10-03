@@ -1,7 +1,8 @@
 """Prueba de humo contra el despliegue REAL (no usa dobles): login con Cognito, sesión, agente, cabeceras y salida.
 
 Crea un usuario TEMPORAL en el pool (sin enviar ningún correo), lo usa con un navegador (Playwright) y lo borra al
-terminar. No modifica incidencias: solo hace consultas al agente.
+terminar. No modifica incidencias: solo hace consultas al agente. En órdenes de cambio crea UNA orden de prueba, la
+cancela y la borra al final (con las credenciales del administrador, porque la app no puede borrar).
 
 Uso:   uv run --with "botocore[crt]" scripts/smoke_live.py [--stack incidencias] [--region us-east-2] [--ask "..."]
 Requiere: credenciales de AWS con permisos de Cognito (admin-create-user/delete-user) y CloudFormation de solo lectura,
@@ -77,6 +78,8 @@ def main() -> int:
     comprobar("frame-ancestors 'none'" in cab.get("content-security-policy", ""), "cabecera CSP con frame-ancestors")
     comprobar(cab.get("strict-transport-security", "").startswith("max-age="), "cabecera HSTS")
 
+    comprobar(http(url + "/api/oc")[0] == 401, "GET /api/oc -> 401")
+    ordenes: list[str] = []
     correo = f"humo-{secrets.token_hex(4)}@example.com"
     clave = "Aa1-" + "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(20))
     aws(a.region, "cognito-idp", "admin-create-user", "--user-pool-id", pool, "--username", correo,
@@ -110,6 +113,26 @@ def main() -> int:
                             ".then(async r => ({s:r.status, j:await r.json()}))")
             comprobar(r["s"] == 200 and bool(r["j"].get("reply")), "el agente responde")
             print(f"    respuesta del agente: {r['j'].get('reply', '')[:160]!r}  acciones: {r['j'].get('actions')}")
+            print("\nÓrdenes de cambio (se crea una orden de prueba y se borra al final):")
+            api = ("(async([m,p,b])=>{const r=await fetch(p,{method:m,headers:{'content-type':'application/json'},"
+                   "body:b?JSON.stringify(b):undefined});return {s:r.status,j:await r.json()}})")
+            comprobar(pg.evaluate(api + "(['GET','/api/oc'])")["s"] == 200, "GET /api/oc -> 200")
+            o = pg.evaluate(api + "(['POST','/api/oc',{tipo:'modificar_valor',titulo:'Orden de prueba (humo)',"
+                            "servicio:'Lambda',parametro:'MemorySize',valor_actual:'256',valor_propuesto:'512'}])")
+            oc_id = o["j"].get("id")
+            ordenes.append(oc_id)
+            comprobar(o["s"] == 201 and o["j"].get("solicitante") == correo, "una persona registra una orden: queda su correo")
+            sin_evaluar = pg.evaluate(api + f"(['POST','/api/oc/{oc_id}/mover',{{a:'aprobada'}}])")
+            comprobar(sin_evaluar["s"] == 400, "no se puede aprobar sin evaluar -> 400")
+            r = pg.evaluate("fetch('/api/chat',{method:'POST',headers:{'content-type':'application/json'},"
+                            "body:JSON.stringify({track:'oc',message:'Consulta con tus herramientas qué órdenes hay "
+                            "abiertas y dime el estado de la orden de prueba (humo).'})}).then(async r => ({s:r.status, j:await r.json()}))")
+            herramientas = [x["tool"] for x in r["j"].get("actions", [])]
+            comprobar(r["s"] == 200 and bool(r["j"].get("reply")), "el agente del módulo responde")
+            comprobar(any(t in ("listar_oc", "consultar_oc") for t in herramientas),
+                      f"el agente usa las herramientas del gateway: {herramientas}")
+            fin = pg.evaluate(api + f"(['POST','/api/oc/{oc_id}/mover',{{a:'cancelada',nota:'prueba de humo'}}])")
+            comprobar(fin["s"] == 200 and fin["j"]["estado"] == "cancelada", "la persona cancela la orden con motivo")
             pg.locator("#out").click()
             pg.wait_for_url("**/auth/signed-out", timeout=30000)
             comprobar(True, "«Salir» (POST) cierra la sesión y pasa por Cognito")
@@ -118,6 +141,13 @@ def main() -> int:
     finally:
         aws(a.region, "cognito-idp", "admin-delete-user", "--user-pool-id", pool, "--username", correo)
         print("\nUsuario temporal eliminado.")
+        if ordenes:  # la app no puede borrar órdenes (a propósito): se limpian con credenciales de administrador
+            tabla = aws(a.region, "cloudformation", "describe-stack-resource", "--stack-name", a.stack,
+                        "--logical-resource-id", "ChangeOrdersTable", "--query",
+                        "StackResourceDetail.PhysicalResourceId", "--output", "text").strip()
+            for oc_id in ordenes:
+                aws(a.region, "dynamodb", "delete-item", "--table-name", tabla, "--key", json.dumps({"id": {"S": oc_id}}))
+            print(f"{len(ordenes)} orden(es) de prueba eliminada(s).")
     print("\nTODO CORRECTO" if not FALLOS else f"\nFALLARON {len(FALLOS)} comprobaciones:\n  - " + "\n  - ".join(FALLOS))
     return 1 if FALLOS else 0
 
