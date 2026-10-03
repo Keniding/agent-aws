@@ -265,3 +265,64 @@ def test_old_conversations_are_discarded_after_a_version_change(page):
     page.get_by_role("button", name="Resumen del día").first.wait_for()
     assert page.locator("#agent .msg").count() == 0
     assert page.evaluate("localStorage.getItem('sid')") is None and page.evaluate("localStorage.getItem('v')") == "3"
+
+
+def box(page, selector):
+    return page.locator(selector).first.bounding_box()
+
+
+def test_wide_screens_use_two_columns_and_a_compact_header(page):
+    page.set_viewport_size({"width": 1440, "height": 800})
+    page.locator("#agentcard").wait_for()
+    agent, lista = box(page, "#agentcard"), box(page, ".col")
+    assert agent["x"] > lista["x"] + lista["width"] - 1  # el agente a la derecha de la lista
+    assert abs(agent["y"] - lista["y"]) < 4  # alineados arriba
+    assert box(page, "header")["height"] < 90  # una sola franja, sin fila aparte para el tema
+
+
+def test_agent_panel_stays_in_view_while_the_list_scrolls(page):
+    for n in range(10):
+        mk(page, f"Incidencia de relleno {n}")
+    page.set_viewport_size({"width": 1440, "height": 700})
+    page.reload()
+    page.locator("article.inc").nth(9).wait_for()
+    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+    top = box(page, "#agentcard")["y"]
+    assert 0 <= top < 40  # sigue pegado arriba aunque la página haya bajado
+    assert page.get_by_label("O escríbele lo que quieras").is_visible()
+
+
+def test_conversation_scrolls_inside_the_panel_and_input_stays_visible(page):
+    page.set_viewport_size({"width": 1440, "height": 700})
+    for _ in range(4):
+        page.get_by_role("button", name="Resumen del día").first.click()
+        page.wait_for_function("!document.querySelector('#send').disabled")
+    panel = box(page, "#agentcard")
+    assert panel["y"] + panel["height"] <= 700  # el panel nunca desborda la pantalla
+    assert page.evaluate("document.querySelector('#agent').scrollHeight > document.querySelector('#agent').clientHeight")
+    assert page.get_by_label("O escríbele lo que quieras").is_visible()
+    assert "chatting" in page.locator("#agentcard").get_attribute("class")  # acciones compactas al conversar
+
+
+@pytest.mark.parametrize("me,expected", [
+    ({"name": "ana@x.com", "email": "ana@x.com", "local": False}, "ana@x.com"),
+    ({"name": "Ana Pérez", "email": "ana@x.com", "local": False}, "Ana Pérez · ana@x.com"),
+])
+def test_user_label_is_not_duplicated(page, me, expected):
+    import json
+
+    page.route("**/api/me", lambda r: r.fulfill(status=200, content_type="application/json", body=json.dumps(me)))
+    page.reload()
+    page.locator("#who").wait_for(state="visible")
+    assert page.locator("#who").inner_text() == expected
+    assert page.get_by_role("link", name="Salir").is_visible()
+
+
+def test_on_phones_the_agent_comes_first(browser, base_url):
+    ctx = browser.new_context(viewport={"width": 390, "height": 844})
+    pg = ctx.new_page()
+    pg.route("**/fonts.googleapis.com/**", lambda r: r.abort())
+    pg.goto(base_url)
+    assert box(pg, "#agentcard")["y"] < box(pg, ".col")["y"]
+    assert pg.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+    ctx.close()

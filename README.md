@@ -123,3 +123,12 @@ categoría, resumen y pasos. La incidencia nueva aparece resaltada en la lista.
 - El agente conoce la fecha de registro (`registrada`, en UTC) y puede responder «¿cuándo registré…?».
 - **Versión del almacenamiento del navegador** (`v`): al cambiar, la web descarta las conversaciones guardadas de
   versiones anteriores, para que un historial antiguo no condicione al agente tras una actualización.
+
+## Distribución de la pantalla
+- **Escritorio (≥1000 px):** dos columnas. A la izquierda el registro (reporte + lista priorizada); a la derecha el
+  **agente fijo en pantalla** (`position:sticky`): acciones rápidas, hilo con su propio scroll y el campo de escribir
+  siempre visible. Al conversar, las acciones se compactan para dejar sitio al hilo.
+- **Cabecera de una franja:** marca, usuario («Nombre · correo», sin repetirlo si coinciden), «Salir» y tema como
+  control segmentado.
+- **Móvil:** una columna con el agente primero (su acción principal queda sin desplazarse) y la lista debajo.
+- Las pruebas de navegador fijan este comportamiento (columnas, panel sin desbordar la pantalla, orden en móvil).
