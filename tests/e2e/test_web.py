@@ -2,6 +2,7 @@
 
 import glob
 import os
+import sys
 
 import pytest
 
@@ -34,6 +35,9 @@ def browser():
 
 @pytest.fixture
 def page(browser, base_url):
+    app = sys.modules["app"]  # el servidor local comparte tabla entre pruebas: se vacía en cada una
+    for item in app._table.scan()["Items"]:
+        app._table.delete_item(Key={"id": item["id"]})
     ctx = browser.new_context(viewport={"width": 1280, "height": 900})
     pg = ctx.new_page()
     pg.route("**/fonts.googleapis.com/**", lambda r: r.abort())  # sin red: cae a fuentes locales
@@ -45,44 +49,108 @@ def page(browser, base_url):
     ctx.close()
 
 
-def test_full_flow(page):
-    page.get_by_label("Título").fill("Caída del servicio de pagos")
-    page.get_by_label("Descripción").fill("Timeouts desde las 10:00")
-    page.get_by_role("button", name="Registrar y clasificar").click()
+def mk(page, title, status=None):
+    """Crea una incidencia por API (como lo haría otro sistema) y, si se pide, fuerza su estado."""
+    inc = page.evaluate(
+        "async t=>(await fetch('/api/incidents',{method:'POST',headers:{'content-type':'application/json'},"
+        "body:JSON.stringify({title:t})})).json()", title)
+    if status:
+        page.evaluate(
+            "async([i,s])=>{await fetch('/api/incidents/'+i,{method:'PATCH',"
+            "headers:{'content-type':'application/json'},body:JSON.stringify({status:s})})}",
+            [inc["id"], status])
+    return inc
+
+
+def card_of(page, title):
+    return page.locator("article.inc", has_text=title)
+
+
+def test_empty_state_guides_the_first_step(page):
+    page.get_by_text("Todo al día. No hay nada pendiente.").wait_for()
+    page.locator("#list").get_by_role("button", name="Reportar un problema").click()
+    assert page.locator("#new").is_visible() and page.evaluate("document.activeElement.id") == "t"
+
+
+def test_report_guided_flow(page):
+    """Reportar con opciones rápidas, ver lo que hizo el agente y resolver con un toque."""
+    page.locator("#open-report").click()
+    page.get_by_role("button", name="Sistema caído").click()  # plantilla: rellena el título
+    assert page.input_value("#t") == "Sistema caído o sin respuesta"
+    page.get_by_text("A todos los clientes").click()
+    page.get_by_role("button", name="Reportar", exact=True).click()
+
     card = page.locator("article.inc").first
     card.wait_for()
-    assert "Caída del servicio de pagos" in card.inner_text()
+    page.get_by_text("la clasifiqué como crítica").wait_for()  # aviso comprensible, no jerga
     assert card.locator(".sev").inner_text().lower() == "crítica"
-    assert "Revisar logs" in card.inner_text()
-    # la crítica la pasó el agente a en_curso con su herramienta cambiar_estado
-    assert "Abiertas 0 // En curso 1 // Resueltas 0" in page.locator("#counts").text_content()
+    assert "en curso" in card.inner_text().lower() and "Revisar logs" in card.inner_text()  # lo hizo el agente
+    assert not page.locator("#new").is_visible()
+    card.get_by_text("Ver descripción").click()
+    assert "Impacto: A todos los clientes." in card.inner_text()
 
-    card.get_by_label("Estado de Caída del servicio de pagos").select_option("resuelta")
-    page.wait_for_function("document.querySelector('#counts').textContent.includes('Resueltas 1')")
-
-    page.get_by_role("button", name="En curso").click()
-    assert page.locator("article.inc").count() == 0
+    card.get_by_role("button", name="Marcar resuelta").click()
+    page.get_by_role("button", name="Deshacer").wait_for()
+    assert page.locator("article.inc").count() == 0  # sale de «Pendientes»
     page.get_by_role("button", name="Resueltas").click()
     assert page.locator("article.inc").count() == 1
     page.reload()  # persistencia en DynamoDB
-    assert page.locator("article.inc").count() == 1
+    page.get_by_role("button", name="Resueltas 1").wait_for()
+
+
+def test_primary_button_follows_the_state_and_undo(page):
+    mk(page, "Error de impresora")
+    page.reload()
+    card = card_of(page, "Error de impresora")
+    assert "abierta" in card.inner_text().lower()
+    card.get_by_role("button", name="Empezar a atender").click()
+    page.wait_for_function("document.querySelector('article.inc').innerText.toLowerCase().includes('en curso')")
+    page.get_by_role("button", name="Deshacer").click()
+    page.wait_for_function("document.querySelector('article.inc').innerText.toLowerCase().includes('abierta')")
+    assert card_of(page, "Error de impresora").get_by_role("button", name="Empezar a atender").count() == 1
+
+
+def test_most_urgent_goes_straight_to_the_agent(page):
+    mk(page, "Fallo menor")
+    mk(page, "Caída total del ERP", status="abierta")  # crítica, pero el agente la dejó abierta aquí
+    page.reload()
+    assert "sugerida" in page.locator("article.inc").first.inner_text().lower()  # la crítica va arriba
+    page.get_by_role("button", name="Atender la más urgente").click()
+    page.locator("#agent .reply").get_by_text("la puse en curso").wait_for()
+    assert "Cambió el estado" in page.locator("#agent").inner_text()  # pasos legibles, no nombres técnicos
+    page.wait_for_function(
+        "[...document.querySelectorAll('article.inc')].some(a=>a.innerText.includes('Caída total')&&a.innerText.toLowerCase().includes('en curso'))")
+    assert "abierta" in card_of(page, "Fallo menor").inner_text().lower()
+    page.locator("#agent").get_by_role("button", name="Resumen del día").wait_for()  # siguiente paso sugerido
+
+
+def test_ask_agent_from_a_card_shows_the_answer_inline(page):
+    mk(page, "Wifi lenta", status="abierta")
+    page.reload()
+    card = card_of(page, "Wifi lenta")
+    card.get_by_role("button", name="Preguntar al agente").click()
+    card.locator(".answer .reply").get_by_text("Prioriza").wait_for()
+    assert page.locator("#agent .reply").count() == 0  # no ensucia el panel principal
 
 
 def test_chat_keeps_session(page):
-    page.get_by_label("Mensaje").fill("¿Qué atiendo primero?")
-    page.get_by_role("button", name="Enviar").click()
-    page.locator("#log .msg").nth(1).get_by_text("Prioriza lo crítico").wait_for()
+    page.get_by_role("button", name="¿Qué atiendo primero?").click()
+    page.locator("#agent .reply").get_by_text("Prioriza lo crítico").wait_for()
+    assert "Revisó las incidencias" in page.locator("#agent").inner_text()
     sid = page.evaluate("localStorage.getItem('sid')")
     assert sid and len(sid) >= 33
-    page.get_by_label("Mensaje").fill("otra")
+    page.get_by_label("O escríbele lo que quieras").fill("otra pregunta")
     page.get_by_role("button", name="Enviar").click()
-    page.locator("#log .msg").nth(3).get_by_text("Prioriza").wait_for()
+    page.locator("#agent .reply").get_by_text("otra pregunta").wait_for()
     assert page.evaluate("localStorage.getItem('sid')") == sid
+    page.get_by_role("button", name="Nueva conversación").click()
+    assert page.evaluate("localStorage.getItem('sid')") is None
 
 
 def test_html_is_escaped(page):
-    page.get_by_label("Título").fill("<img src=x onerror=window.pwn=1>")
-    page.get_by_role("button", name="Registrar y clasificar").click()
+    page.locator("#open-report").click()
+    page.fill("#t", "<img src=x onerror=window.pwn=1>")
+    page.get_by_role("button", name="Reportar", exact=True).click()
     page.locator("article.inc").first.wait_for()
     assert page.evaluate("window.pwn") is None
     assert "<img" in page.locator("article.inc h3").first.inner_text()
@@ -113,4 +181,5 @@ def test_mobile_no_horizontal_scroll(browser, base_url):
     pg.route("**/fonts.googleapis.com/**", lambda r: r.abort())
     pg.goto(base_url)
     assert pg.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+    assert pg.get_by_role("button", name="Atender la más urgente").is_visible()  # la acción clave, sin scroll
     ctx.close()

@@ -55,3 +55,15 @@ fallback local.
 - La URL es pública (`AuthType NONE`) y cualquiera puede crear incidencias y gastar tokens: antes de uso
   real, añade autenticación (Cognito/IAM), WAF y límites.
 - La lista usa `Scan` (válido para volúmenes pequeños); para muchos datos, añade un índice por estado/fecha.
+
+## Experiencia de uso (poca carga cognitiva)
+- **Inicio con acciones directas al agente:** «Atender la más urgente» (camino feliz, destacada), «¿Qué atiendo
+  primero?», «Resumen del día» y «Reportar un problema». Un toque, sin escribir; el chat libre queda debajo.
+- **Reporte guiado en dos pasos:** plantillas de problemas frecuentes + «¿a quién afecta?» (opcional); el detalle
+  va plegado. El agente clasifica y la web avisa en lenguaje llano («la clasifiqué como crítica y la puse en curso»).
+- **Lista priorizada:** solo «Pendientes» por defecto, ordenada por severidad, con la primera marcada como
+  «Sugerida». Cada tarjeta tiene **un** botón principal según su estado (Empezar a atender → Marcar resuelta →
+  Reabrir) más «Preguntar al agente», cuya respuesta aparece dentro de la tarjeta. Los cambios se pueden
+  **deshacer** desde el aviso.
+- Lo que hizo el agente se muestra en español («✓ Revisó las incidencias», «↻ … (reintentó)»), no como nombres
+  de herramientas, y tras cada respuesta hay siguientes pasos sugeridos.

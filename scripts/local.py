@@ -43,28 +43,49 @@ class FakeToolStream:
 class FakeRuntime:
     """Agente falso con el mismo protocolo que el harness: pide herramientas y luego responde."""
 
+    RANK = {"critica": 0, "alta": 1, "media": 2, "baja": 3}
+
     def __init__(self):
-        self.queue = {}  # sesión -> llamadas pendientes
+        self.queue = {}  # sesión -> pasos pendientes: (herramienta, args) | función(resultado) | texto final
+
+    @staticmethod
+    def _start_most_urgent(result):
+        items = json.loads(result).get("incidencias", [])
+        if not items:
+            return "No hay incidencias pendientes."
+        best = min(items, key=lambda i: FakeRuntime.RANK.get(i["severidad"], 4))
+        return ("cambiar_estado", {"id": best["id"], "estado": "en_curso"})
+
+    def _next(self, pend, result):
+        while pend:
+            step = pend.pop(0)
+            if callable(step):
+                step = step(result)
+            if isinstance(step, str):
+                return {"stream": FakeStream(step)}
+            if step:
+                return {"stream": FakeToolStream(*step)}
+        return {"stream": FakeStream("Incidencia gestionada.")}
 
     def invoke_harness(self, harnessArn, runtimeSessionId, messages, tools=None):
         first = messages[0]["content"][0]
+        sid = runtimeSessionId
         if "toolResult" in first:
-            pend = self.queue.get(runtimeSessionId, [])
-            if pend:
-                name, args = pend.pop(0)
-                return {"stream": FakeToolStream(name, args)}
-            return {"stream": FakeStream("Incidencia gestionada.")}
+            return self._next(self.queue.get(sid, []), first["toolResult"]["content"][0]["text"])
         text = first["text"]
         if text.startswith("Ha entrado una incidencia nueva"):
             iid = text.split("id ")[1].split(")")[0]
-            crit = "caída" in text.lower() or "caida" in text.lower()
-            pend = [("cambiar_estado", {"id": iid, "estado": "en_curso"})] if crit else []
-            self.queue[runtimeSessionId] = pend
+            crit = any(w in text.lower() for w in ("caída", "caida", "caído", "caido"))
+            self.queue[sid] = [("cambiar_estado", {"id": iid, "estado": "en_curso"})] if crit else []
             return {"stream": FakeToolStream("clasificar_incidencia", {
                 "id": iid, "severidad": "critica" if crit else "media", "categoria": "Infraestructura",
                 "resumen": "Resumen automático.", "proximos_pasos": ["Revisar logs", "Avisar al equipo"]})}
-        if text.startswith("¿qué atiendo"):
-            self.queue[runtimeSessionId] = []
+        if text.lower().startswith("¿qué atiendo"):
+            self.queue[sid] = ["Prioriza lo crítico: atiende primero la de mayor severidad."]
+            return {"stream": FakeToolStream("listar_incidencias", {})}
+        if text.startswith("Toma la incidencia pendiente"):
+            self.queue[sid] = [self._start_most_urgent,
+                               "Hecho: la puse en curso. Primeros pasos: revisar logs y avisar al equipo."]
             return {"stream": FakeToolStream("listar_incidencias", {})}
         return {"stream": FakeStream("Prioriza lo crítico. " + text[:60])}
 
