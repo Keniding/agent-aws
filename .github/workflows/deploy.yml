@@ -22,6 +22,7 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
       - run: uv sync --frozen
+      - run: uv run playwright install --with-deps chromium
       - run: uv run pytest -q
       - run: ./scripts/package.sh
       - name: Upload code

@@ -11,5 +11,6 @@ jobs:
       - uses: astral-sh/setup-uv@v10.2.0
       - run: uv sync --frozen
       - run: uv run ruff check .
-      - run: uv run pytest -q
+      - run: uv run playwright install --with-deps chromium
+      - run: uv run pytest -q   # unitarias (moto) + e2e (Chromium)
       - run: ./scripts/package.sh

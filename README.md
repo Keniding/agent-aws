@@ -32,7 +32,22 @@ GitHub usan los últimos tags existentes al crear el repo.
 4. Push a `main` (o ejecutar `deploy` a mano): sube el zip, despliega `template.yaml`, crea/actualiza el
    harness e imprime la URL. `ci.yml` valida ramas y PRs; `destroy.yml` (manual) lo borra todo.
 
-Local: `uv sync && uv run pytest && ./scripts/package.sh`.
+## Pruebas y ejecución local
+- `uv sync && uv run pytest` — 10 pruebas de la API (Lambda real + DynamoDB simulado con moto + harness falso)
+  y 8 e2e de navegador (Chromium vía Playwright): alta, clasificación, filtros, cambio de estado,
+  persistencia, chat con sesión, escape de HTML, tres temas y móvil. Si Chromium está preinstalado en otra
+  revisión, se detecta en `PLAYWRIGHT_BROWSERS_PATH` o con `CHROMIUM_PATH`.
+- `uv run scripts/local.py` — la web completa en `http://127.0.0.1:8000` sin AWS (datos y agente simulados).
+- `./scripts/package.sh` — genera `build/lambda.zip`.
+
+Estas pruebas **no** llaman a Bedrock ni al harness reales: eso solo se valida desplegando.
+
+## Diseño
+La web sigue el sistema *Humanismo Editorial*: papel sin blanquear, tinta, terracota como campo, serif
+(EB Garamond) para titulares, grotesca (Hanken Grotesk) para interfaz, mono (JetBrains Mono) para pasos,
+rótulos `//`, esquinas rectas, sin sombras y cuadrícula milimétrica. Temas Papel / Tinta / Alto contraste
+(automático por preferencias del sistema, o selector manual). Las fuentes vienen de Google Fonts con
+fallback local.
 
 ## Pendiente de validar
 - Sin acceso a los docs de AWS ni a una cuenta desde el sandbox: la forma de la API sale del modelo de

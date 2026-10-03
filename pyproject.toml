@@ -8,7 +8,12 @@ readme = "README.md"
 dependencies = ["boto3"]
 
 [dependency-groups]
-dev = ["pytest", "ruff"]
+dev = [
+    "moto[dynamodb]>=5.2.3",
+    "playwright>=1.63.0",
+    "pytest",
+    "ruff",
+]
 
 [tool.ruff]
 line-length = 100
