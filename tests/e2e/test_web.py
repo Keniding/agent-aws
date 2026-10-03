@@ -183,3 +183,27 @@ def test_mobile_no_horizontal_scroll(browser, base_url):
     assert pg.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
     assert pg.get_by_role("button", name="Atender la más urgente").is_visible()  # la acción clave, sin scroll
     ctx.close()
+
+
+def test_conversation_thread_is_kept_and_survives_reload(page):
+    """El detalle de la conversación: cada pregunta y cada respuesta quedan visibles, también al recargar."""
+    page.get_by_role("button", name="¿Qué atiendo primero?").click()
+    page.locator("#agent .msg.bot .reply").first.wait_for()
+    page.get_by_label("O escríbele lo que quieras").fill("segunda pregunta")
+    page.get_by_role("button", name="Enviar").click()
+    page.locator("#agent .msg.bot .reply").nth(1).get_by_text("segunda pregunta").wait_for()
+
+    me = page.locator("#agent .msg.me")
+    assert me.count() == 2 and "¿Qué atiendo primero?" in me.nth(0).inner_text()  # etiqueta legible, no el prompt
+    assert "segunda pregunta" in me.nth(1).inner_text()
+    assert page.locator("#agent .msg.bot").count() == 2
+    assert page.locator("#agent .suggest").count() == 1  # un único bloque de siguientes pasos, al final
+
+    page.reload()
+    page.locator("#agent .msg.me").nth(1).wait_for()
+    assert page.locator("#agent .msg.me").count() == 2 and page.locator("#agent .msg.bot .reply").count() == 2
+    page.get_by_role("button", name="Nueva conversación").click()
+    assert page.locator("#agent .msg").count() == 0
+    page.reload()
+    page.get_by_role("button", name="Resumen del día").first.wait_for()
+    assert page.locator("#agent .msg").count() == 0  # no reaparece

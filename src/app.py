@@ -70,7 +70,8 @@ def harness_arn() -> str:
 
 def _short(i: dict) -> dict:
     return {"id": i["id"], "titulo": i["title"], "severidad": i.get("severity", "sin_clasificar"),
-            "estado": i["status"], "resumen": i.get("summary", "")}
+            "estado": i["status"], "resumen": i.get("summary", ""), "categoria": i.get("category", ""),
+            "proximos_pasos": i.get("next_steps", [])}
 
 
 def run_tool(name: str, args: dict) -> dict:
@@ -82,7 +83,8 @@ def run_tool(name: str, args: dict) -> dict:
         return {"incidencias": [_short(i) for i in items[:30]]}
     iid = str(args.get("id", ""))
     if not ID_RE.match(iid):
-        raise ValueError("id inválido")
+        raise ValueError("id inválido: usa exactamente un id de 32 caracteres hexadecimales tal como lo "
+                         "devuelve listar_incidencias (no inventes ni acortes ids)")
     if name == "clasificar_incidencia":
         sev = args.get("severidad")
         if sev not in SEVERITIES:
@@ -110,16 +112,20 @@ def _update(iid, expr, values, names=None):
         raise ValueError("la incidencia no existe") from None
 
 
-def invoke(session_id: str, messages: list):
+def invoke(session_id: str, messages: list, actor: str = None):
     """Una vuelta al harness: devuelve (texto, llamadas a herramientas, motivo de parada)."""
-    resp = _runtime.invoke_harness(harnessArn=harness_arn(), runtimeSessionId=session_id,
-                                   messages=messages, tools=TOOLS)
+    extra = {"actorId": actor} if actor else {}  # memoria a largo plazo aislada por usuario
+    resp = _runtime.invoke_harness(harnessArn=harness_arn(), runtimeSessionId=session_id, **extra,
+                                   messages=messages, tools=TOOLS,
+                                   allowedTools=["@" + t["name"] for t in TOOLS])  # «@nombre»: solo las nuestras, sin shell
     text, calls, cur, stop = [], [], None, None
     for event in resp["stream"]:
         tu = event.get("contentBlockStart", {}).get("start", {}).get("toolUse")
         if tu:
-            cur = {"id": tu["toolUseId"], "name": tu["name"], "input": ""}
-            calls.append(cur)
+            cur = None  # solo nuestras herramientas se ejecutan aquí; las ajenas se ignoran
+            if tu["name"] in {t["name"] for t in TOOLS}:
+                cur = {"id": tu["toolUseId"], "name": tu["name"], "input": ""}
+                calls.append(cur)
         delta = event.get("contentBlockDelta", {}).get("delta", {})
         if "text" in delta:
             text.append(delta["text"])
@@ -131,11 +137,11 @@ def invoke(session_id: str, messages: list):
     return "".join(text).rsplit("</think>", 1)[-1].strip(), calls, stop
 
 
-def ask(session_id: str, text: str):
+def ask(session_id: str, text: str, actor: str = None):
     """Bucle del agente: el harness decide, aquí se ejecutan sus herramientas. -> (respuesta, acciones)."""
     messages, actions, reply = [{"role": "user", "content": [{"text": text}]}], [], ""
     for _ in range(MAX_STEPS):
-        reply, calls, stop = invoke(session_id, messages)
+        reply, calls, stop = invoke(session_id, messages, actor)
         if stop != "tool_use" or not calls:
             break
         results = []
@@ -173,8 +179,18 @@ def create_incident(title: str, description: str) -> dict:
     return item
 
 
-def chat(session_id: str, message: str):
-    return ask(session_id, message)
+def snapshot() -> str:
+    """Estado real de lo pendiente: se adjunta a cada pregunta como fuente de verdad."""
+    pend = [i for i in list_incidents() if i["status"] != "resuelta"]
+    rows = [f"- {i['id']} · {i.get('severity', 'sin_clasificar')} · {i['status']} · {i['title']}" for i in pend[:20]]
+    more = f"\n(y {len(pend) - 20} más)" if len(pend) > 20 else ""
+    return (f"[Estado actual de las incidencias pendientes ({len(pend)}). Es la única fuente de verdad: "
+            "ignora cualquier incidencia que recuerdes de conversaciones anteriores.]\n"
+            + ("\n".join(rows) or "(ninguna)") + more)
+
+
+def chat(session_id: str, message: str, actor: str = None):
+    return ask(session_id, f"{message}\n\n{snapshot()}", actor)
 
 
 def _json(status: int, body) -> dict:
@@ -245,7 +261,7 @@ def handler(event, _context):
         if not SESSION_RE.match(sid):
             return _json(400, {"error": "session_id inválido"})
         try:
-            reply, actions = chat(sid, message)
+            reply, actions = chat(sid, message, user.get("sub"))
             return _json(200, {"session_id": sid, "reply": reply, "actions": actions})
         except Exception as exc:  # noqa: BLE001 - solo exponemos la clase del error
             print("chat failed:", repr(exc))

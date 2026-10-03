@@ -100,3 +100,12 @@ Cognito lo admite como proveedor federado, pero requiere crear un cliente OAuth 
 puede por CLI): con su `client_id` y `client_secret` se añade un `AWS::Cognito::UserPoolIdentityProvider` y
 `SupportedIdentityProviders: [COGNITO, Google]`. `src/auth.py` no cambia (sigue validando el id_token de Cognito).
 Ojo: con Google habría que filtrar también por correo/dominio (el control actual solo cubre el registro propio).
+
+## Conversación y fiabilidad del agente
+- **Hilo visible:** el panel del agente muestra cada pregunta («Tú») y cada respuesta («Agente») con los pasos que
+  ejecutó; se conserva al recargar y se limpia con «Nueva conversación» o si entra otro usuario.
+- **Solo sus herramientas:** `allowedTools=["@listar_incidencias", …]` (el formato `@nombre` es el que acepta
+  AWS; con nombres sueltos el agente deja de llamar a las herramientas). Así no puede usar `shell` ni otras internas.
+- **Fuente de verdad:** cada pregunta del chat lleva adjunto el estado real de lo pendiente, y el prompt del agente
+  le prohíbe usar incidencias recordadas. La memoria a largo plazo del harness se aísla por usuario (`actorId` = sub
+  de Cognito). Los resultados de las herramientas incluyen `proximos_pasos` para que pueda informar de ellos.

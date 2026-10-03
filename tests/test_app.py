@@ -87,7 +87,7 @@ def test_chat_agent_lists_only_open_incidents(app):
         def __init__(self):
             self.n = 0
 
-        def invoke_harness(self, harnessArn, runtimeSessionId, messages, tools=None):
+        def invoke_harness(self, harnessArn, runtimeSessionId, messages, tools=None, allowedTools=None):
             self.n += 1
             seen["tools"] = [t["name"] for t in tools]
             if self.n == 1:
@@ -116,7 +116,7 @@ def test_agent_tool_errors_go_back_to_the_agent(app):
         def __init__(self):
             self.n = 0
 
-        def invoke_harness(self, harnessArn, runtimeSessionId, messages, tools=None):
+        def invoke_harness(self, harnessArn, runtimeSessionId, messages, tools=None, allowedTools=None):
             self.n += 1
             if self.n == 1:
                 return {"stream": local.FakeToolStream("clasificar_incidencia", {
@@ -175,3 +175,56 @@ def test_harness_arn_lookup_by_name(app):
         raise AssertionError("debía fallar")
     except RuntimeError as e:
         assert "falta" in str(e)
+
+
+def test_agent_is_restricted_to_our_tools_and_foreign_calls_are_ignored(app):
+    """Se pasa allowedTools (sin shell) y una llamada a una herramienta ajena no se ejecuta ni se cuenta."""
+    seen = {}
+
+    class Foreign:
+        def invoke_harness(self, harnessArn, runtimeSessionId, messages, tools=None, allowedTools=None):
+            seen["allowed"] = allowedTools
+            return {"stream": local.FakeToolStream("shell", {"command": "rm -rf /"})}
+
+    app._runtime = Foreign()
+    status, out = call(app, "POST", "/api/chat", {"message": "hola"})
+    assert status == 200 and out["actions"] == []
+    assert seen["allowed"] == ["@listar_incidencias", "@clasificar_incidencia", "@cambiar_estado"]  # formato real de AWS
+
+
+def test_bad_id_error_tells_the_agent_how_to_fix_it(app):
+    try:
+        app.run_tool("cambiar_estado", {"id": "123", "estado": "resuelta"})
+        raise AssertionError("debía fallar")
+    except ValueError as e:
+        assert "listar_incidencias" in str(e)
+
+
+def test_tool_results_include_stored_steps_so_the_agent_can_report_them(app):
+    _, inc = call(app, "POST", "/api/incidents", {"title": "Caída del correo"})
+    out = app.run_tool("cambiar_estado", {"id": inc["id"], "estado": "resuelta"})
+    assert out["proximos_pasos"] == ["Revisar logs", "Avisar al equipo"] and out["categoria"] == "Infraestructura"
+    listed = app.run_tool("listar_incidencias", {"estado": "resuelta"})["incidencias"]
+    assert listed[0]["proximos_pasos"] == ["Revisar logs", "Avisar al equipo"]
+
+
+def test_chat_attaches_the_real_state_as_source_of_truth_and_scopes_memory_per_user(app):
+    seen = {}
+
+    class Spy:
+        def invoke_harness(self, harnessArn, runtimeSessionId, messages, tools=None, allowedTools=None, **kw):
+            seen["text"] = messages[0]["content"][0]["text"]
+            seen["kw"] = kw
+            return {"stream": local.FakeStream("ok")}
+
+    call(app, "POST", "/api/incidents", {"title": "PENDIENTE-UNO"})
+    _, b = call(app, "POST", "/api/incidents", {"title": "CERRADA-DOS"})
+    call(app, "PATCH", f"/api/incidents/{b['id']}", {"status": "resuelta"})
+    app._runtime = Spy()
+    app.chat("s" * 40, "¿cuántas hay?", actor="user-123")
+    t = seen["text"]
+    assert t.startswith("¿cuántas hay?") and "PENDIENTE-UNO" in t and "CERRADA-DOS" not in t
+    assert "fuente de verdad" in t and "(1)" in t
+    assert seen["kw"] == {"actorId": "user-123"}
+    app.chat("s" * 40, "otra")  # sin usuario (modo local): no se envía actorId
+    assert seen["kw"] == {}

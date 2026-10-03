@@ -67,7 +67,7 @@ class FakeRuntime:
                 return {"stream": FakeToolStream(*step)}
         return {"stream": FakeStream("Incidencia gestionada.")}
 
-    def invoke_harness(self, harnessArn, runtimeSessionId, messages, tools=None):
+    def invoke_harness(self, harnessArn, runtimeSessionId, messages, tools=None, allowedTools=None):
         first = messages[0]["content"][0]
         sid = runtimeSessionId
         if "toolResult" in first:

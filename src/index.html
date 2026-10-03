@@ -81,6 +81,10 @@ button:disabled{opacity:.55;cursor:progress}
 .answer{margin-top:var(--space-4)}
 .answer:empty{display:none}
 .reply{border-left:3px solid var(--accent);padding:var(--space-1) var(--space-4);white-space:pre-wrap}
+#agent{max-height:60vh;overflow-y:auto}
+.msg{margin-top:var(--space-4)}
+.msg.me{background:var(--surface);border:1px solid var(--rule);padding:var(--space-2) var(--space-4);margin-left:var(--space-8)}
+.msg.me>div:last-child{white-space:pre-wrap;font-weight:600}
 .did{list-style:none;margin:var(--space-2) 0 0;padding:0 0 0 var(--space-4);font:14px/22px var(--mono);color:var(--ink-muted)}
 .did .bad{opacity:.7}
 .chips{display:flex;gap:var(--space-2);flex-wrap:wrap;margin-top:var(--space-2)}
@@ -200,7 +204,7 @@ summary{cursor:pointer;font:600 14px/22px var(--sans);color:var(--ink-muted)}
 const $=id=>document.getElementById(id),LABEL={abierta:'Abierta',en_curso:'En curso',resuelta:'Resuelta'},SEV={critica:'crítica',sin_clasificar:'sin clasificar'};
 const RANK={critica:0,alta:1,media:2,baja:3};
 const DID={listar_incidencias:'Revisó las incidencias',clasificar_incidencia:'Clasificó la incidencia',cambiar_estado:'Cambió el estado'};
-const Q={urgent:'Toma la incidencia pendiente más urgente: llama a listar_incidencias, luego a cambiar_estado con estado en_curso sobre la más urgente, y dime sus primeros pasos.',
+const Q={urgent:'Toma la incidencia pendiente más urgente: llama a listar_incidencias, luego a cambiar_estado con estado en_curso sobre la más urgente, y dime sus primeros pasos: usa los proximos_pasos que te devuelven las herramientas, no los inventes ni me pidas datos.',
  first:'¿Qué atiendo primero? Revisa las incidencias pendientes y dime cuál y por qué, en dos líneas.',
  summary:'Dame un resumen breve del estado actual de las incidencias.'};
 let sid=null,items=[],filter='pending',busy=false,toastTimer=null;const inline={};
@@ -223,26 +227,45 @@ function toast(msg,undo){const t=$('toast');clearTimeout(toastTimer);t.replaceCh
  if(undo){const b=el('button','ghost','Deshacer');b.onclick=()=>{t.hidden=true;undo()};t.append(b)}
  t.hidden=false;toastTimer=setTimeout(()=>{t.hidden=true},7000)}
 
-/* Pregunta al agente y pinta la respuesta en `out`; refresca la lista porque pudo cambiar datos */
-async function ask(q,out,chips){
- if(busy)return;setBusy(true);out.replaceChildren(thinking());
+/* Conversación: el panel principal es un hilo (tú / agente) que se conserva al recargar */
+const LABELS={urgent:'Atender la más urgente',first:'¿Qué atiendo primero?',summary:'Resumen del día'};
+let thread=[];
+try{thread=JSON.parse(localStorage.getItem('thread')||'[]')}catch{}
+function saveThread(){try{localStorage.setItem('thread',JSON.stringify(thread.slice(-20)))}catch{}}
+function resetConversation(){sid=null;thread=[];try{localStorage.removeItem('sid');localStorage.removeItem('thread')}catch{};$('agent').replaceChildren()}
+function turn(q,j){
+ const me=el('div','msg me');me.append(el('div','label muted','Tú //'),el('div',null,q));
+ const bot=el('div','msg bot');if(j)bot.append(answer(j));return [me,bot]}
+function suggest(){const c=el('div','chips suggest');
+ [['Atender la siguiente',()=>ask(Q.urgent,$('agent'),LABELS.urgent)],['Resumen del día',()=>ask(Q.summary,$('agent'),LABELS.summary)],
+  ['Nueva conversación',resetConversation]].forEach(([t,f])=>{const b=el('button','ghost chip',t);b.onclick=f;c.append(b)});return c}
+function renderThread(){const out=$('agent');out.replaceChildren(...thread.flatMap(t=>turn(t.q,t)));
+ if(thread.length){out.append(suggest());out.scrollTop=out.scrollHeight}}
+
+/* Pregunta al agente. En el panel principal añade un turno al hilo; en una tarjeta pinta solo la respuesta.
+   Refresca la lista porque el agente pudo cambiar datos. */
+async function ask(q,out,label){
+ if(busy)return;setBusy(true);
+ const main=out.id==='agent';let me=null,bot=out;
+ if(main){out.querySelectorAll('.suggest').forEach(n=>n.remove());[me,bot]=turn(label||q,null);
+  bot.append(thinking());out.append(me,bot);out.scrollTop=out.scrollHeight}
+ else out.replaceChildren(thinking());
  try{const j=await api('/api/chat','POST',{message:q,session_id:sid});sid=j.session_id;
   try{localStorage.setItem('sid',sid)}catch{}
-  out.replaceChildren(answer(j,chips));await load()}
+  bot.replaceChildren(answer(j));
+  if(main){thread.push({q:label||q,reply:j.reply,actions:j.actions});saveThread();out.append(suggest());out.scrollTop=out.scrollHeight}
+  await load()}
  catch(x){const e=el('div');e.append(el('p','err','No pude hablar con el agente: '+x.message));
-  const b=el('button','ghost chip','Reintentar');b.onclick=()=>{setBusy(false);ask(q,out,chips)};e.append(b);out.replaceChildren(e)}
+  const b=el('button','ghost chip','Reintentar');
+  b.onclick=()=>{if(me){me.remove();bot.remove()}setBusy(false);ask(q,out,label)};e.append(b);bot.replaceChildren(e)}
  finally{setBusy(false)}}
-function answer(j,chips){
+function answer(j){
  const d=el('div');d.append(el('div','label muted','Agente //'),el('div','reply',j.reply||'Hecho.'));
  if(j.actions&&j.actions.length){const u=el('ul','did');
   j.actions.forEach(a=>u.append(el('li',a.ok?'':'bad',(a.ok?'✓ ':'↻ ')+(DID[a.tool]||a.tool)+(a.ok?'':' (reintentó)'))));d.append(u)}
- if(chips){const c=el('div','chips');
-  [['Atender la siguiente',()=>ask(Q.urgent,$('agent'),true)],['Resumen del día',()=>ask(Q.summary,$('agent'),true)],
-   ['Nueva conversación',()=>{sid=null;try{localStorage.removeItem('sid')}catch{};$('agent').replaceChildren()}]]
-   .forEach(([t,f])=>{const b=el('button','ghost chip',t);b.onclick=f;c.append(b)});d.append(c)}
  return d}
-document.querySelectorAll('.tile[data-q]').forEach(b=>b.onclick=()=>ask(Q[b.dataset.q],$('agent'),true));
-$('chat').onsubmit=e=>{e.preventDefault();const q=$('m').value.trim();if(!q)return;$('m').value='';ask(q,$('agent'),true)};
+document.querySelectorAll('.tile[data-q]').forEach(b=>b.onclick=()=>ask(Q[b.dataset.q],$('agent'),LABELS[b.dataset.q]));
+$('chat').onsubmit=e=>{e.preventDefault();const q=$('m').value.trim();if(!q)return;$('m').value='';ask(q,$('agent'))};
 
 /* Lista priorizada */
 function render(){
@@ -295,6 +318,7 @@ $('new').onsubmit=async e=>{e.preventDefault();if(busy)return;setBusy(true);
    :'Quedó registrada, pero el agente no pudo clasificarla ahora. Pídeselo desde su tarjeta.');
   const n=document.querySelector(`[data-id="${inc.id}"]`);if(n){n.classList.add('new');n.scrollIntoView({block:'center'});setTimeout(()=>n.classList.remove('new'),5000)}}
  catch(x){$('ns').replaceChildren(el('span','err','No se pudo registrar: '+x.message))}finally{setBusy(false)}};
-api("/api/me").then(m=>{if(!m.local){$("who").textContent=m.name+(m.email?" · "+m.email:"");$("who").hidden=false;$("out").hidden=false}}).catch(()=>{});
+api("/api/me").then(m=>{try{if(localStorage.getItem("who")!==m.email){if(localStorage.getItem("who")!==null)resetConversation();localStorage.setItem("who",m.email)}}catch{}
+ renderThread();if(!m.local){$("who").textContent=m.name+(m.email?" · "+m.email:"");$("who").hidden=false;$("out").hidden=false}}).catch(()=>{});
 load();
 </script></body></html>
