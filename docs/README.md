@@ -32,6 +32,7 @@ flowchart LR
 
 | # | Documento | Contenido | Léelo si quieres… |
 |---|-----------|-----------|-------------------|
+| 00 | [Marco teórico general](00-marco-teorico.md) | Qué es cada concepto y para qué se usa en general (nube, IaC, HTTP, OIDC, NoSQL, LLM/agentes/herramientas, IAM, observabilidad, CI/CD, pruebas, UX) y dónde se aplica aquí | …entender los fundamentos antes del detalle |
 | 01 | [Visión y arquitectura](01-vision-arquitectura.md) | Objetivos, requisitos, componentes, flujos de extremo a extremo, modelo de datos, mapa del código | …entender el sistema completo de un vistazo |
 | 02 | [Agente: AgentCore Harness](02-agentcore-harness.md) | Teoría de agentes, anatomía del harness, herramientas, memoria, modelo, prompts, fiabilidad | …entender o modificar el agente |
 | 03 | [Servicios de AWS](03-servicios-aws.md) | Cada servicio usado: qué es, por qué, configuración exacta, límites, alternativas descartadas | …saber qué hay desplegado y por qué |
@@ -69,8 +70,8 @@ Principio: **no suponer nada**; lo que no se sabía se investigó y lo que no se
 | Control | Resultado |
 |---------|-----------|
 | Fuentes primarias (documentación de AWS, RFC, OIDC, OWASP, W3C, GitHub, NN/g) consultadas el 3 oct 2026 | Listadas con enlace en [11](11-glosario-referencias.md) |
-| **Enlaces**: petición real a cada URL | 66 de 66 enlaces reales responden `200` (los otros 5 textos son marcadores como `<región>` o `127.0.0.1`) |
-| **Diagramas**: 23 bloques Mermaid renderizados con el CLI oficial (`@mermaid-js/mermaid-cli`) | 23 de 23 renderizan; **2 estaban rotos** (un `;` en un mensaje de diagrama de secuencia) y se corrigieron |
+| **Enlaces**: petición real a cada URL | 80 de 80 enlaces reales responden `200` (los otros 5 textos son marcadores como `<región>` o `127.0.0.1`) |
+| **Diagramas**: 31 bloques Mermaid renderizados con el CLI oficial (`@mermaid-js/mermaid-cli`) | 31 de 31 renderizan; **2 estaban rotos** (un `;` en un mensaje de diagrama de secuencia) y se corrigieron |
 | **Hechos del sistema** | Verificados contra la cuenta real (marcados «verificado»), con `scripts/smoke_live.py` (19 comprobaciones) y las 103 pruebas |
 | **Cálculos** (contraste WCAG, costes) | Hechos con script o fórmula explícita; los de coste declaran sus supuestos y se corrigieron dos errores propios al revisarlos |
 

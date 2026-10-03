@@ -11,7 +11,8 @@ Todo se paga por uso: Lambda, DynamoDB on-demand, harness de AgentCore (sin carg
 runtime/memoria consumidos) y Bedrock. Sin tráfico no hay coste, salvo el bucket S3 con el zip.
 
 ## Documentación
-Marco teórico y técnico completo en [`docs/`](docs/README.md): arquitectura, el agente de AgentCore, servicios de AWS,
+Marco teórico y técnico completo en [`docs/`](docs/README.md), empezando por el
+[marco teórico general](docs/00-marco-teorico.md) (qué es cada concepto y para qué se usa en general): arquitectura, el agente de AgentCore, servicios de AWS,
 autenticación y seguridad, API, interfaz y UX, pruebas, CI/CD, decisiones y lecciones, operación y costes, glosario y
 referencias (con fuentes verificadas y los diagramas en Mermaid).
 

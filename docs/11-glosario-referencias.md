@@ -171,6 +171,28 @@
 | U5 | [W3C: Understanding SC 2.5.8 Target Size (Minimum)](https://www.w3.org/WAI/WCAG22/Understanding/target-size-minimum.html) |
 | U6 | NN/g, [*Progressive Disclosure*](https://www.nngroup.com/articles/progressive-disclosure/) |
 
+### Marco teórico general
+
+Usadas en [00](00-marco-teorico.md). Además, los códigos `MT-R*`, `MT-O*`, `MT-D*`, `MT-S1`, `MT-T*` y `MT-U*` de ese documento
+equivalen a los de las tablas anteriores sin el prefijo.
+
+| Código | Fuente |
+|--------|--------|
+| MT1 | NIST, [SP 800-145: *The NIST Definition of Cloud Computing*](https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-145.pdf) |
+| MT2 | AWS, [¿Qué es la infraestructura como código?](https://aws.amazon.com/what-is/iac/) |
+| MT3 | AWS, [Serverless architectures](https://aws.amazon.com/lambda/serverless-architectures-learn-more/) |
+| MT4 | [RFC 9110 — HTTP Semantics](https://www.rfc-editor.org/rfc/rfc9110) (métodos seguros e idempotentes) |
+| MT5 | Vaswani et al., [*Attention Is All You Need*](https://arxiv.org/abs/1706.03762) (2017) |
+| MT6 | [Model Context Protocol: introducción](https://modelcontextprotocol.io/introduction) |
+| MT7 | Lewis et al., [*Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks*](https://arxiv.org/abs/2005.11401) (2020) |
+| MT8 | AWS, [IAM: buenas prácticas de seguridad](https://docs.aws.amazon.com/IAM/latest/UserGuide/best-practices.html) |
+| MT9 | AWS, [DynamoDB: componentes principales](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/HowItWorks.CoreComponents.html) |
+| MT10 | OpenTelemetry, [Observability primer](https://opentelemetry.io/docs/concepts/observability-primer/) |
+| MT11 | Anthropic, [Tool use with Claude](https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview) |
+| MT12 | AWS, [Continuous delivery](https://aws.amazon.com/devops/continuous-delivery/) |
+| MT13 | MDN, [Same-origin policy](https://developer.mozilla.org/en-US/docs/Web/Security/Same-origin_policy) |
+| MT14 | [RFC 7519 — JSON Web Token](https://www.rfc-editor.org/rfc/rfc7519) |
+
 ## 3. Qué se verificó por cuenta propia (y no está en estas fuentes)
 
 Hechos descubiertos **probando contra la cuenta real** y que la documentación **no** recoge o recoge distinto: formato `@nombre` de
