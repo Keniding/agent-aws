@@ -121,7 +121,7 @@ crean **fuera** de la pila (ver [03](03-servicios-aws.md) y [08](08-cicd-desplie
 | Entorno local | `scripts/local.py` | Servidor local con DynamoDB simulado (moto) y agente simulado |
 | Empaquetado | `scripts/package.sh` | Construye `build/lambda.zip` con dependencias del lock |
 | Rol de GitHub | `scripts/github-oidc/` | Proveedor OIDC + rol de despliegue + secreto `AWS_ROLE_ARN` |
-| Pruebas | `tests/` | 103 pruebas: API, auth, registro, navegador |
+| Pruebas | `tests/` | 130 pruebas: API, auth, registro, órdenes de cambio, navegador |
 | Pipelines | `.github/workflows/` | `ci`, `deploy` (manual), `destroy` (manual) |
 
 ## 6. Flujos de extremo a extremo
@@ -217,7 +217,7 @@ No hay índices secundarios: la lista se obtiene con `Scan` (válido para volúm
 │   ├── local.py            # servidor local + dobles
 │   ├── package.sh          # construye build/lambda.zip
 │   └── github-oidc/        # rol y proveedor OIDC de GitHub
-├── tests/                  # 103 pruebas (pytest, moto, Playwright)
+├── tests/                  # 130 pruebas (pytest, moto, Playwright)
 ├── .github/workflows/      # ci · deploy (manual) · destroy (manual)
 ├── template.yaml           # CloudFormation
 ├── pyproject.toml · uv.lock

@@ -10,6 +10,14 @@ Navegador ──► Lambda (Function URL: web + API) ──► DynamoDB (bajo de
 Todo se paga por uso: Lambda, DynamoDB on-demand, harness de AgentCore (sin cargo propio; se factura el
 runtime/memoria consumidos) y Bedrock. Sin tráfico no hay coste, salvo el bucket S3 con el zip.
 
+## Órdenes de cambio
+Segundo módulo (pestaña «Órdenes de cambio»): seguimiento de peticiones de cambiar un valor de un servicio de AWS o de
+pedir un recurso. **Solo se hace seguimiento**, nada se modifica en AWS. Flujo: solicitada → evaluada → aprobada →
+programada → ejecutada → verificada. El agente usa herramientas serverless (Lambda detrás de **AgentCore Gateway**, MCP) y
+la habilidad `gestion-oc` (`skills/`); puede registrar, evaluar y anotar, pero **aprobar y cerrar solo lo hace una
+persona**. Detalle en [docs/12](docs/12-ordenes-de-cambio.md). Rutas: `GET/POST /api/oc`,
+`POST /api/oc/{id}/evaluar|mover|nota`, y `POST /api/chat` con `"track": "oc"`.
+
 ## Documentación
 Marco teórico y técnico completo en [`docs/`](docs/README.md), empezando por el
 [marco teórico general](docs/00-marco-teorico.md) (qué es cada concepto y para qué se usa en general): arquitectura, el agente de AgentCore, servicios de AWS,
@@ -39,7 +47,7 @@ GitHub usan los últimos tags existentes al crear el repo.
    harness e imprime la URL. `ci.yml` valida ramas y PRs; `destroy.yml` (manual) lo borra todo.
 
 ## Pruebas y ejecución local
-- `uv sync && uv run pytest` — **103 pruebas**: API y agente (Lambda real + DynamoDB simulado con moto + agente simulado),
+- `uv sync && uv run pytest` — **130 pruebas**: API y agente (Lambda real + DynamoDB simulado con moto + agente simulado),
   autenticación, control de registro y 31 e2e de navegador (Chromium vía Playwright). `uv run ruff check .` para el lint.
   Si Chromium está preinstalado en otra revisión, se detecta en `PLAYWRIGHT_BROWSERS_PATH` o con `CHROMIUM_PATH`.
 - `uv run scripts/local.py` — la web completa en `http://127.0.0.1:8000` sin AWS (datos y agente simulados).

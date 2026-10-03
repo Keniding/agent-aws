@@ -171,6 +171,19 @@
 | U5 | [W3C: Understanding SC 2.5.8 Target Size (Minimum)](https://www.w3.org/WAI/WCAG22/Understanding/target-size-minimum.html) |
 | U6 | NN/g, [*Progressive Disclosure*](https://www.nngroup.com/articles/progressive-disclosure/) |
 
+### AgentCore Gateway y habilidades
+
+Usadas en [12](12-ordenes-de-cambio.md).
+
+| Código | Fuente |
+|--------|--------|
+| GW1 | [Gateway: destinos Lambda (formato de entrada, `bedrockAgentCoreToolName`, prefijo `___`)](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-add-target-lambda.html) |
+| GW2 | [Harness: herramientas (`agentcore_gateway`, `allowedTools`, `@servidor`, `@builtin`)](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness-tools.html) |
+| GW3 | [CloudFormation: AWS::BedrockAgentCore::Gateway](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-bedrockagentcore-gateway.html) |
+| GW4 | [CloudFormation: AWS::BedrockAgentCore::GatewayTarget](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-bedrockagentcore-gatewaytarget.html) y [`SchemaDefinition`](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-properties-bedrockagentcore-gatewaytarget-schemadefinition.html) |
+| SK1 | [Harness: habilidades (fuentes S3, Git, AWS y ruta; divulgación progresiva)](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness-skills.html) |
+| SK2 | [Especificación AgentSkills (`SKILL.md`)](https://agentskills.io/specification) |
+
 ### Marco teórico general
 
 Usadas en [00](00-marco-teorico.md). Además, los códigos `MT-R*`, `MT-O*`, `MT-D*`, `MT-S1`, `MT-T*` y `MT-U*` de ese documento

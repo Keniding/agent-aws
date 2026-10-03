@@ -289,7 +289,7 @@ no despliegue continuo → [08](08-cicd-despliegue.md).
 - **Prueba de humo**: comprobación rápida y superficial de que lo esencial funciona tras un despliegue.
 - **Pruebas de extremo a extremo (e2e)**: recorren el sistema como un usuario (aquí con un navegador real).
 
-**Aquí:** 103 pruebas y una prueba de humo contra AWS real → [07](07-pruebas-calidad.md).
+**Aquí:** 130 pruebas y una prueba de humo contra AWS real → [07](07-pruebas-calidad.md).
 
 ## 11. Experiencia de usuario y accesibilidad
 

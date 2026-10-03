@@ -44,6 +44,7 @@ flowchart LR
 | 09 | [Decisiones y lecciones](09-decisiones-lecciones.md) | Registro de decisiones (ADR) y catálogo de problemas encontrados con su solución | …saber *por qué* es así y qué errores evitar |
 | 10 | [Operación y costes](10-operacion-costes.md) | Runbooks, observabilidad, cuotas, modelo de costes, limitaciones y hoja de ruta | …operar el sistema en el día a día |
 | 11 | [Glosario y referencias](11-glosario-referencias.md) | Términos, estándares (RFC, OWASP, WCAG) y fuentes | …aclarar un término o ir a la fuente |
+| 12 | [Órdenes de cambio](12-ordenes-de-cambio.md) | Segundo flujo: herramientas serverless tras AgentCore Gateway (MCP), habilidad `gestion-oc`, flujo con aprobación humana, qué puede y qué no puede el agente | …entender o ampliar el módulo de órdenes de cambio |
 
 ## Estado de validación (resumen honesto)
 
@@ -52,7 +53,7 @@ flowchart LR
 | Despliegue de la pila en AWS y funcionamiento del agente real con herramientas | ✅ Validado contra la cuenta real |
 | Login con Cognito (código + PKCE), sesión, salida, registro con control de correo | ✅ Validado con usuarios temporales reales |
 | Despliegue desde GitHub Actions con rol OIDC | ✅ Validado (ejecución manual `deploy`, en verde) |
-| Suite automática: 103 pruebas (API, auth, registro, navegador) + lint | ✅ Pasa en Python 3.12 (CI) y 3.14 (local) |
+| Suite automática: 130 pruebas (API, auth, registro, órdenes de cambio, navegador) + lint | ✅ Pasa en Python 3.12 (CI) y 3.14 (local) |
 | Pruebas automáticas contra Bedrock/Cognito **reales** | ❌ No existen: las pruebas usan dobles; lo real se validó a mano |
 | MFA, WAF, límites de uso por usuario, cabeceras de seguridad (CSP/HSTS) | ❌ No implementados (ver [riesgos](04-autenticacion-seguridad.md#8-riesgos-residuales-y-hoja-de-ruta)) |
 | Calidad del modelo (Nemotron Nano 9B) | ⚠️ Modelo pequeño y no determinista; comportamiento mejorado con prompts/herramientas, no garantizado |
@@ -70,9 +71,9 @@ Principio: **no suponer nada**; lo que no se sabía se investigó y lo que no se
 | Control | Resultado |
 |---------|-----------|
 | Fuentes primarias (documentación de AWS, RFC, OIDC, OWASP, W3C, GitHub, NN/g) consultadas el 3 oct 2026 | Listadas con enlace en [11](11-glosario-referencias.md) |
-| **Enlaces**: petición real a cada URL | 80 de 80 enlaces reales responden `200` (los otros 5 textos son marcadores como `<región>` o `127.0.0.1`) |
-| **Diagramas**: 31 bloques Mermaid renderizados con el CLI oficial (`@mermaid-js/mermaid-cli`) | 31 de 31 renderizan; **2 estaban rotos** (un `;` en un mensaje de diagrama de secuencia) y se corrigieron |
-| **Hechos del sistema** | Verificados contra la cuenta real (marcados «verificado»), con `scripts/smoke_live.py` (19 comprobaciones) y las 103 pruebas |
+| **Enlaces**: petición real a cada URL | 87 de 87 enlaces reales responden `200` (los otros 5 textos son marcadores como `<región>` o `127.0.0.1`) |
+| **Diagramas**: 33 bloques Mermaid renderizados con el CLI oficial (`@mermaid-js/mermaid-cli`) | 33 de 33 renderizan; **2 estaban rotos** (un `;` en un mensaje de diagrama de secuencia) y se corrigieron |
+| **Hechos del sistema** | Verificados contra la cuenta real (marcados «verificado»), con `scripts/smoke_live.py` (26 comprobaciones) y las 130 pruebas |
 | **Cálculos** (contraste WCAG, costes) | Hechos con script o fórmula explícita; los de coste declaran sus supuestos y se corrigieron dos errores propios al revisarlos |
 
 ### Lo que la investigación cambió en el código

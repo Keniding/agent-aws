@@ -12,10 +12,10 @@ las pruebas lo más abajo posible** de la pirámide» [T1].
 
 ```mermaid
 flowchart TB
-    subgraph PIR["Nuestra pirámide (103 pruebas automáticas)"]
+    subgraph PIR["Nuestra pirámide (130 pruebas automáticas)"]
         direction TB
-        E2E["Navegador real (Chromium): 31<br/>lento, el más frágil"]
-        INT["Handler completo con DynamoDB simulado: 58 (API 23 + auth 35)"]
+        E2E["Navegador real (Chromium): 36<br/>lento, el más frágil"]
+        INT["Handler completo con DynamoDB simulado: 80 (API 23 + auth 35 + órdenes 22)"]
         UNI["Unitarias puras: 14 (control de registro)"]
     end
     E2E --- INT --- UNI
@@ -58,14 +58,15 @@ Comandos: `uv sync`, `uv run pytest`, `uv run ruff check .`, `uv run playwright 
 El **CI** ejecuta lint, el `pytest` completo (incluidos los e2e) y el empaquetado, en **Python 3.12**; en local se ha
 probado también con **3.14**.
 
-## 3. Suites (103 pruebas)
+## 3. Suites (130 pruebas)
 
 | Archivo | Nº | Qué cubre |
 |---------|---:|-----------|
 | `tests/test_app.py` | 23 | Contrato de la API, validación, **bucle del agente** (herramientas, errores devueltos al agente, límite de vueltas, herramientas ajenas ignoradas), `allowedTools` en formato `@nombre`, JSON Schema directo, `crear_incidencia`, snapshot y `actorId`, **contrato del `session_id` (33–100)**, fecha de registro, **paginación del Scan con 700 elementos** y lecturas consistentes |
 | `tests/test_auth.py` | 35 | Flujo OIDC completo con Cognito simulado (**PKCE verificado**), rechazo de `aud`/`iss`/`token_use`/`nonce`/`exp` falsos, `state` incorrecto o hostil (Unicode, emojis, 5 000 caracteres, NUL, HTML), cookies manipuladas/caducadas/de otra clave, **Fetch Metadata y Origin**, **logout por POST**, **cabeceras de seguridad en todas las respuestas**, falla cerrada sin configuración |
 | `tests/test_presignup.py` | 14 | Lista de correos/dominios, mayúsculas, dominios parecidos (`@evilcorp.com`), `a@evil.com@corp.com`, lista vacía, `AdminCreateUser`, proveedores externos |
-| `tests/e2e/test_web.py` | 31 | Recorridos de usuario en Chromium (ver [06 §10](06-frontend-ux.md#10-pruebas-relevantes)) |
+| `tests/e2e/test_web.py` | 36 | Recorridos de usuario en Chromium (ver [06 §10](06-frontend-ux.md#10-pruebas-relevantes)); 5 son del módulo de órdenes |
+| `tests/test_oc.py` | 22 | Órdenes de cambio: flujo, herramientas del agente y módulo del agente (ver [12](12-ordenes-de-cambio.md)) |
 
 Aislamiento: cada prueba de API crea su propia app + tabla simulada; las e2e **vacían la tabla** antes de cada prueba (antes
 dependían del orden). `conftest.py` fija `AUTH_DISABLED=1` **antes** de que nadie importe `auth` (si no, el resultado dependía del
@@ -114,7 +115,7 @@ uv run --with "botocore[crt]" scripts/smoke_live.py [--stack incidencias] [--reg
    **una pregunta real al agente** (solo consulta), «Salir» y comprobación de 401.
 5. **Borra el usuario** (en `finally`, aunque algo falle). Sale con código 1 si algo falla.
 
-Última ejecución (3 oct 2026): **19 comprobaciones, todas correctas** (el agente respondió con `listar_incidencias`). En esa
+Última ejecución (3 oct 2026): **26 comprobaciones, todas correctas** (19 de incidencias y acceso + 7 del módulo de órdenes de cambio) (el agente respondió con `listar_incidencias`). En esa
 misma respuesta aparecieron fragmentos corruptos («חדא negotiate»): ruido del modelo pequeño que ninguna prueba detecta (⚠️).
 
 > Pasos que **no** hace (a propósito): crear/modificar incidencias reales (el agente puede cambiar estados; se usó solo una
