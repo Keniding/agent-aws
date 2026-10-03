@@ -77,7 +77,7 @@ La URL de la Function URL sigue siendo pública, pero **la app no sirve nada sin
   10 min; se validan emisor, audiencia, `token_use`, nonce y caducidad. La sesión es una cookie
   `__Host-session` firmada con HMAC (clave generada en Secrets Manager), `HttpOnly`, `Secure`, `SameSite=Lax`,
   8 h (`SESSION_HOURS`). Las escrituras también comprueban `Origin` contra CSRF.
-- **Sin registro libre:** solo un administrador da de alta usuarios (contraseña mínima de 12).
+- **Registro propio con código por correo (sin dar de alta a mano):** la persona pulsa «Sign up» en el login, recibe un código en su email y entra. Solo vale para los correos/dominios de `AllowedSignups` (`src/presignup.py`); **vacío = nadie se registra solo**, así nadie ajeno gasta tokens. Contraseña mínima de 12. Los administradores pueden seguir dando de alta a mano.
 - **Salir** cierra la sesión de la app y la de Cognito.
 - **Dar de alta a alguien:**
   ```
@@ -88,3 +88,15 @@ La URL de la Function URL sigue siendo pública, pero **la app no sirve nada sin
   Cognito le envía un correo con una contraseña temporal. Para quitar acceso: `admin-delete-user` o `admin-disable-user`.
 - **Local y pruebas:** `AUTH_DISABLED=1` (lo fijan `scripts/local.py` y `tests/conftest.py`); nunca se define en AWS.
 - Validado contra Cognito real: login, sesión, agente tras el login, salida y reentrada pidiendo credenciales.
+
+### Quién puede registrarse solo
+```
+aws cloudformation deploy ... --parameter-overrides ... AllowedSignups="ana@empresa.com,@empresa.com"
+```
+En GitHub Actions: variable `ALLOWED_SIGNUPS` (ya se pasa al desplegar). Acepta correos exactos y dominios con `@`.
+
+### Entrar con Google (opcional)
+Cognito lo admite como proveedor federado, pero requiere crear un cliente OAuth en Google Cloud Console (no se
+puede por CLI): con su `client_id` y `client_secret` se añade un `AWS::Cognito::UserPoolIdentityProvider` y
+`SupportedIdentityProviders: [COGNITO, Google]`. `src/auth.py` no cambia (sigue validando el id_token de Cognito).
+Ojo: con Google habría que filtrar también por correo/dominio (el control actual solo cubre el registro propio).

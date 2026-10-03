@@ -40,7 +40,8 @@ jobs:
             --capabilities CAPABILITY_IAM --no-fail-on-empty-changeset \
             --parameter-overrides LambdaRuntime="$(cat build/runtime.txt)" \
               HarnessName="$HARNESS_NAME" \
-              CodeBucket="$BUCKET" CodeKey="$KEY"
+              CodeBucket="$BUCKET" CodeKey="$KEY" \
+              AllowedSignups="${{ vars.ALLOWED_SIGNUPS }}"
       - name: Create/update harness
         run: |
           export HARNESS_ROLE_ARN=$(aws cloudformation describe-stacks --stack-name "$STACK" \

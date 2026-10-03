@@ -12,6 +12,12 @@ Parameters:
     Type: String
   CodeKey:
     Type: String
+  AllowedSignups:
+    Type: String
+    Default: ""
+    Description: >-
+      Correos («ana@empresa.com») o dominios («@empresa.com») que pueden registrarse solos, separados por
+      comas. Vacío = nadie se registra por su cuenta (solo usuarios dados de alta por un administrador).
 
 Resources:
   IncidentsTable:
@@ -118,8 +124,10 @@ Resources:
       UserPoolName: !Sub "${AWS::StackName}-usuarios"
       UsernameAttributes: [email]
       AutoVerifiedAttributes: [email]
+      LambdaConfig:
+        PreSignUp: !GetAtt PreSignUpFunction.Arn  # el registro propio solo vale para correos autorizados
       AdminCreateUserConfig:
-        AllowAdminCreateUserOnly: true  # sin registro libre
+        AllowAdminCreateUserOnly: false  # registro propio con código por correo, filtrado por AllowedSignups
         InviteMessageTemplate:
           EmailSubject: Acceso a Incidencias
           EmailMessage: "Hola. Tu usuario es {username} y tu contraseña temporal es {####}. Entra y elige una nueva."
@@ -134,6 +142,33 @@ Resources:
       MfaConfiguration: "OFF"
       AccountRecoverySetting:
         RecoveryMechanisms: [{Name: verified_email, Priority: 1}]
+  PreSignUpRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - {Effect: Allow, Principal: {Service: lambda.amazonaws.com}, Action: "sts:AssumeRole"}
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+  PreSignUpFunction:  # mismo paquete de código que la app, otro manejador
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: !Ref LambdaRuntime
+      Handler: presignup.handler
+      Role: !GetAtt PreSignUpRole.Arn
+      Timeout: 5
+      MemorySize: 128
+      Code: {S3Bucket: !Ref CodeBucket, S3Key: !Ref CodeKey}
+      Environment:
+        Variables: {ALLOWED_SIGNUPS: !Ref AllowedSignups}
+  PreSignUpPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref PreSignUpFunction
+      Action: lambda:InvokeFunction
+      Principal: cognito-idp.amazonaws.com
+      SourceArn: !Sub "arn:${AWS::Partition}:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/*"
   UserPoolDomain:
     Type: AWS::Cognito::UserPoolDomain
     Properties:
