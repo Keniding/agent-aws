@@ -105,7 +105,7 @@ def test_chat_agent_lists_only_open_incidents(app):
     res = seen["result"]
     assert res["status"] == "success" and "content" in res and "json" not in res["content"][0]
     assert "ABIERTA-UNO" in res["content"][0]["text"] and "CERRADA-DOS" not in res["content"][0]["text"]
-    assert seen["tools"] == ["listar_incidencias", "clasificar_incidencia", "cambiar_estado"]
+    assert seen["tools"] == ["crear_incidencia", "listar_incidencias", "clasificar_incidencia", "cambiar_estado"]
 
 
 def test_agent_tool_errors_go_back_to_the_agent(app):
@@ -189,7 +189,7 @@ def test_agent_is_restricted_to_our_tools_and_foreign_calls_are_ignored(app):
     app._runtime = Foreign()
     status, out = call(app, "POST", "/api/chat", {"message": "hola"})
     assert status == 200 and out["actions"] == []
-    assert seen["allowed"] == ["@listar_incidencias", "@clasificar_incidencia", "@cambiar_estado"]  # formato real de AWS
+    assert seen["allowed"] == ["@crear_incidencia", "@listar_incidencias", "@clasificar_incidencia", "@cambiar_estado"]  # formato real de AWS
 
 
 def test_bad_id_error_tells_the_agent_how_to_fix_it(app):
@@ -228,3 +228,34 @@ def test_chat_attaches_the_real_state_as_source_of_truth_and_scopes_memory_per_u
     assert seen["kw"] == {"actorId": "user-123"}
     app.chat("s" * 40, "otra")  # sin usuario (modo local): no se envía actorId
     assert seen["kw"] == {}
+
+
+def test_agent_can_create_an_incident_and_the_system_generates_the_id(app):
+    out = app.run_tool("crear_incidencia", {"titulo": "Errores 500 en la plataforma de agentes",
+                                            "severidad": "alta", "categoria": "Sistema",
+                                            "resumen": "La plataforma devuelve 500.",
+                                            "proximos_pasos": ["Revisar logs", "Avisar a guardia"]})
+    assert len(out["id"]) == 32 and out["severidad"] == "alta" and out["estado"] == "abierta"
+    _, items = call(app, "GET", "/api/incidents")
+    saved = next(i for i in items if i["id"] == out["id"])
+    assert saved["title"].startswith("Errores 500") and saved["severity"] == "alta"
+    assert saved["category"] == "Sistema" and saved["next_steps"] == ["Revisar logs", "Avisar a guardia"]
+
+
+def test_create_tool_only_needs_a_title_and_validates(app):
+    out = app.run_tool("crear_incidencia", {"titulo": "  Wifi caída  "})
+    assert out["titulo"] == "Wifi caída" and out["severidad"] == "sin_clasificar"
+    for bad in ({}, {"titulo": "   "}, {"titulo": "x", "severidad": "apocaliptica"}):
+        try:
+            app.run_tool("crear_incidencia", bad)
+            raise AssertionError(f"debía fallar: {bad}")
+        except ValueError:
+            pass
+    assert len(call(app, "GET", "/api/incidents")[1]) == 1  # los inválidos no dejaron basura
+
+
+def test_chat_registers_an_incident_end_to_end(app):
+    status, out = call(app, "POST", "/api/chat", {"message": "Registra una incidencia: la impresora no imprime"})
+    assert status == 200 and out["actions"] == [{"tool": "crear_incidencia", "ok": True}]
+    _, items = call(app, "GET", "/api/incidents")
+    assert [i["title"] for i in items] == ["la impresora no imprime"]

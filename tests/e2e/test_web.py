@@ -207,3 +207,14 @@ def test_conversation_thread_is_kept_and_survives_reload(page):
     page.reload()
     page.get_by_role("button", name="Resumen del día").first.wait_for()
     assert page.locator("#agent .msg").count() == 0  # no reaparece
+
+
+def test_register_an_incident_by_chatting(page):
+    """Escribir «registra…» crea la incidencia sin pedir ids ni datos: aparece resaltada en la lista."""
+    page.get_by_label("O escríbele lo que quieras").fill("Registra una incidencia: la impresora no imprime")
+    page.get_by_role("button", name="Enviar").click()
+    page.locator("#agent .msg.bot .reply").get_by_text("Registrada").wait_for()
+    assert "Registró la incidencia" in page.locator("#agent").inner_text()
+    card = card_of(page, "la impresora no imprime")
+    card.wait_for()
+    assert "new" in card.get_attribute("class")  # resaltada para que se vea qué cambió

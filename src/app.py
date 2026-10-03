@@ -43,6 +43,13 @@ def _tool(name, description, props, required):
 
 
 TOOLS = [
+    _tool("crear_incidencia", "Registra una incidencia nueva. El id lo genera el sistema: nunca se lo pidas al "
+          "usuario. Deduce título, severidad, categoría, resumen y pasos del texto del usuario y no le pidas "
+          "más datos.",
+          {"titulo": {"type": "string"}, "descripcion": {"type": "string"},
+           "severidad": {"type": "string", "enum": SEVERITIES}, "categoria": {"type": "string"},
+           "resumen": {"type": "string"}, "proximos_pasos": {"type": "array", "items": {"type": "string"}}},
+          ["titulo"]),
     _tool("listar_incidencias", "Lista las incidencias (id, título, severidad, estado, resumen). "
           "Sin filtro devuelve solo las no resueltas.",
           {"estado": {"type": "string", "enum": sorted(STATUSES)}}, []),
@@ -81,6 +88,20 @@ def run_tool(name: str, args: dict) -> dict:
         items = list_incidents()
         items = [i for i in items if (i["status"] == est if est in STATUSES else i["status"] != "resuelta")]
         return {"incidencias": [_short(i) for i in items[:30]]}
+    if name == "crear_incidencia":
+        title = _text(args.get("titulo"), 200)
+        if not title:
+            raise ValueError("falta el título de la incidencia")
+        sev = args.get("severidad")
+        if sev is not None and sev not in SEVERITIES:
+            raise ValueError(f"severidad debe ser una de {SEVERITIES}")
+        steps = args.get("proximos_pasos")
+        item = new_item(title, _text(args.get("descripcion"), MAX_CHARS))
+        item.update(severity=sev or "sin_clasificar", category=_text(args.get("categoria"), 60),
+                    summary=_text(args.get("resumen"), 300),
+                    next_steps=[str(s)[:200] for s in steps][:3] if isinstance(steps, list) else [])
+        _table.put_item(Item=item)
+        return _short(item)
     iid = str(args.get("id", ""))
     if not ID_RE.match(iid):
         raise ValueError("id inválido: usa exactamente un id de 32 caracteres hexadecimales tal como lo "
@@ -164,10 +185,14 @@ def list_incidents() -> list:
     return sorted(items, key=lambda i: i["created_at"], reverse=True)
 
 
-def create_incident(title: str, description: str) -> dict:
-    item = {"id": uuid.uuid4().hex, "title": title, "description": description,
+def new_item(title: str, description: str) -> dict:
+    return {"id": uuid.uuid4().hex, "title": title, "description": description,
             "status": "abierta", "created_at": int(time.time()),
             "severity": "sin_clasificar", "category": "", "summary": "", "next_steps": []}
+
+
+def create_incident(title: str, description: str) -> dict:
+    item = new_item(title, description)
     _table.put_item(Item=item)  # primero se guarda: si el agente falla, la incidencia no se pierde
     try:
         _, actions = ask(str(uuid.uuid4()), NEW_INCIDENT_PROMPT.format(

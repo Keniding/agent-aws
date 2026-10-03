@@ -109,3 +109,8 @@ Ojo: con Google habría que filtrar también por correo/dominio (el control actu
 - **Fuente de verdad:** cada pregunta del chat lleva adjunto el estado real de lo pendiente, y el prompt del agente
   le prohíbe usar incidencias recordadas. La memoria a largo plazo del harness se aísla por usuario (`actorId` = sub
   de Cognito). Los resultados de las herramientas incluyen `proximos_pasos` para que pueda informar de ellos.
+
+## Registrar incidencias conversando
+El agente tiene la herramienta `crear_incidencia`: «Registra que la impresora no imprime» crea la incidencia al
+primer mensaje. El id lo genera el sistema (nunca se le pide al usuario) y el agente deduce título, severidad,
+categoría, resumen y pasos. La incidencia nueva aparece resaltada en la lista.

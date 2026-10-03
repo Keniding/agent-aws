@@ -165,7 +165,7 @@ summary{cursor:pointer;font:600 14px/22px var(--sans);color:var(--ink-muted)}
   <div id="agent" class="answer" aria-live="polite"></div>
   <form id="chat"><label for="m" class="label muted">O escríbele lo que quieras</label>
    <div class="row"><input type="text" id="m" required maxlength="2000" autocomplete="off"
-     placeholder="Ej.: cierra la de pagos"><button id="send">Enviar</button></div></form>
+     placeholder="Ej.: registra que la impresora no imprime"><button id="send">Enviar</button></div></form>
  </section>
 
  <form id="new" class="card" hidden><span class="label muted">Alta // Nueva incidencia</span>
@@ -203,7 +203,7 @@ summary{cursor:pointer;font:600 14px/22px var(--sans);color:var(--ink-muted)}
 <script>
 const $=id=>document.getElementById(id),LABEL={abierta:'Abierta',en_curso:'En curso',resuelta:'Resuelta'},SEV={critica:'crítica',sin_clasificar:'sin clasificar'};
 const RANK={critica:0,alta:1,media:2,baja:3};
-const DID={listar_incidencias:'Revisó las incidencias',clasificar_incidencia:'Clasificó la incidencia',cambiar_estado:'Cambió el estado'};
+const DID={crear_incidencia:'Registró la incidencia',listar_incidencias:'Revisó las incidencias',clasificar_incidencia:'Clasificó la incidencia',cambiar_estado:'Cambió el estado'};
 const Q={urgent:'Toma la incidencia pendiente más urgente: llama a listar_incidencias, luego a cambiar_estado con estado en_curso sobre la más urgente, y dime sus primeros pasos: usa los proximos_pasos que te devuelven las herramientas, no los inventes ni me pidas datos.',
  first:'¿Qué atiendo primero? Revisa las incidencias pendientes y dime cuál y por qué, en dos líneas.',
  summary:'Dame un resumen breve del estado actual de las incidencias.'};
@@ -242,6 +242,10 @@ function suggest(){const c=el('div','chips suggest');
 function renderThread(){const out=$('agent');out.replaceChildren(...thread.flatMap(t=>turn(t.q,t)));
  if(thread.length){out.append(suggest());out.scrollTop=out.scrollHeight}}
 
+function flashNew(before){const fresh=items.filter(i=>!before.has(i.id));if(!fresh.length)return;
+ filter='pending';render();
+ fresh.forEach((i,k)=>{const n=document.querySelector(`[data-id="${i.id}"]`);if(!n)return;n.classList.add('new');
+  if(k===0)n.scrollIntoView({block:'center'});setTimeout(()=>n.classList.remove('new'),5000)})}
 /* Pregunta al agente. En el panel principal añade un turno al hilo; en una tarjeta pinta solo la respuesta.
    Refresca la lista porque el agente pudo cambiar datos. */
 async function ask(q,out,label){
@@ -254,7 +258,7 @@ async function ask(q,out,label){
   try{localStorage.setItem('sid',sid)}catch{}
   bot.replaceChildren(answer(j));
   if(main){thread.push({q:label||q,reply:j.reply,actions:j.actions});saveThread();out.append(suggest());out.scrollTop=out.scrollHeight}
-  await load()}
+  const before=new Set(items.map(i=>i.id));await load();flashNew(before)}
  catch(x){const e=el('div');e.append(el('p','err','No pude hablar con el agente: '+x.message));
   const b=el('button','ghost chip','Reintentar');
   b.onclick=()=>{if(me){me.remove();bot.remove()}setBusy(false);ask(q,out,label)};e.append(b);bot.replaceChildren(e)}

@@ -80,6 +80,10 @@ class FakeRuntime:
             return {"stream": FakeToolStream("clasificar_incidencia", {
                 "id": iid, "severidad": "critica" if crit else "media", "categoria": "Infraestructura",
                 "resumen": "Resumen automático.", "proximos_pasos": ["Revisar logs", "Avisar al equipo"]})}
+        if text.lower().startswith("registra una incidencia"):
+            title = text.split("\n")[0].split(":", 1)[-1].strip()
+            self.queue[sid] = ["Registrada. La clasifiqué y ya está en tu lista."]
+            return {"stream": FakeToolStream("crear_incidencia", {"titulo": title, "severidad": "media"})}
         if text.lower().startswith("¿qué atiendo"):
             self.queue[sid] = ["Prioriza lo crítico: atiende primero la de mayor severidad."]
             return {"stream": FakeToolStream("listar_incidencias", {})}
