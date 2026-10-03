@@ -10,6 +10,11 @@ Navegador ──► Lambda (Function URL: web + API) ──► DynamoDB (bajo de
 Todo se paga por uso: Lambda, DynamoDB on-demand, harness de AgentCore (sin cargo propio; se factura el
 runtime/memoria consumidos) y Bedrock. Sin tráfico no hay coste, salvo el bucket S3 con el zip.
 
+## Documentación
+Marco teórico y técnico completo en [`docs/`](docs/README.md): arquitectura, el agente de AgentCore, servicios de AWS,
+autenticación y seguridad, API, interfaz y UX, pruebas, CI/CD, decisiones y lecciones, operación y costes, glosario y
+referencias (con fuentes verificadas y los diagramas en Mermaid).
+
 ## API
 | Método y ruta | Qué hace |
 |---|---|
@@ -33,14 +38,13 @@ GitHub usan los últimos tags existentes al crear el repo.
    harness e imprime la URL. `ci.yml` valida ramas y PRs; `destroy.yml` (manual) lo borra todo.
 
 ## Pruebas y ejecución local
-- `uv sync && uv run pytest` — 10 pruebas de la API (Lambda real + DynamoDB simulado con moto + harness falso)
-  y 8 e2e de navegador (Chromium vía Playwright): alta, clasificación, filtros, cambio de estado,
-  persistencia, chat con sesión, escape de HTML, tres temas y móvil. Si Chromium está preinstalado en otra
-  revisión, se detecta en `PLAYWRIGHT_BROWSERS_PATH` o con `CHROMIUM_PATH`.
+- `uv sync && uv run pytest` — **103 pruebas**: API y agente (Lambda real + DynamoDB simulado con moto + agente simulado),
+  autenticación, control de registro y 31 e2e de navegador (Chromium vía Playwright). `uv run ruff check .` para el lint.
+  Si Chromium está preinstalado en otra revisión, se detecta en `PLAYWRIGHT_BROWSERS_PATH` o con `CHROMIUM_PATH`.
 - `uv run scripts/local.py` — la web completa en `http://127.0.0.1:8000` sin AWS (datos y agente simulados).
 - `./scripts/package.sh` — genera `build/lambda.zip`.
 
-Estas pruebas **no** llaman a Bedrock ni al harness reales: eso solo se valida desplegando.
+Estas pruebas **no** llaman a Bedrock, AgentCore ni Cognito reales: eso lo cubre `scripts/smoke_live.py` (manual, contra el despliegue real).
 
 ## Diseño
 La web sigue el sistema *Humanismo Editorial*: papel sin blanquear, tinta, terracota como campo, serif
