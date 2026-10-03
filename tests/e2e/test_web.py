@@ -318,11 +318,11 @@ def test_user_label_is_not_duplicated(page, me, expected):
     assert page.get_by_role("link", name="Salir").is_visible()
 
 
-def test_on_phones_the_agent_comes_first(browser, base_url):
+def test_on_phones_the_list_comes_first(browser, base_url):
     ctx = browser.new_context(viewport={"width": 390, "height": 844})
     pg = ctx.new_page()
     pg.route("**/fonts.googleapis.com/**", lambda r: r.abort())
     pg.goto(base_url)
-    assert box(pg, "#agentcard")["y"] < box(pg, ".col")["y"]
+    assert box(pg, ".col")["y"] < box(pg, "#agentcard")["y"]
     assert pg.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
     ctx.close()

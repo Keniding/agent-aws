@@ -130,5 +130,5 @@ categoría, resumen y pasos. La incidencia nueva aparece resaltada en la lista.
   siempre visible. Al conversar, las acciones se compactan para dejar sitio al hilo.
 - **Cabecera de una franja:** marca, usuario («Nombre · correo», sin repetirlo si coinciden), «Salir» y tema como
   control segmentado.
-- **Móvil:** una columna con el agente primero (su acción principal queda sin desplazarse) y la lista debajo.
+- **Móvil:** una columna con la lista primero y el agente debajo.
 - Las pruebas de navegador fijan este comportamiento (columnas, panel sin desbordar la pantalla, orden en móvil).
