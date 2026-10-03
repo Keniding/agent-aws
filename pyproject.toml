@@ -1,0 +1,18 @@
+[project]
+name = "agent-aws"
+version = "0.1.0"
+description = "Demo: web + Lambda (pay-per-use) -> AgentCore harness (pay-per-use)"
+readme = "README.md"
+# InvokeHarness / CreateHarness only exist in recent boto3; the Lambda runtime's
+# bundled boto3 may be older, so we always vendor boto3 into the package.
+dependencies = ["boto3"]
+
+[dependency-groups]
+dev = ["pytest", "ruff"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "scripts"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]

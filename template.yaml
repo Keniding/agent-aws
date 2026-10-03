@@ -1,0 +1,102 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Demo - Lambda Function URL (web+API) in front of an AgentCore harness
+
+Parameters:
+  LambdaRuntime:
+    Type: String
+    Description: Lambda runtime id matching the Python that built the package (derived in CI)
+  HarnessName:
+    Type: String
+    Default: agent_aws_demo
+  ModelId:
+    Type: String
+    Description: Bedrock model / inference-profile id the harness may invoke
+  CodeBucket:
+    Type: String
+  CodeKey:
+    Type: String
+
+Resources:
+  HarnessRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: bedrock-agentcore.amazonaws.com}
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals: {"aws:SourceAccount": !Ref AWS::AccountId}
+              ArnLike: {"aws:SourceArn": !Sub "arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:harness/*"}
+      Policies:
+        - PolicyName: harness
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # Starting point; refine against the "harness-security" doc page for your features.
+              - Effect: Allow
+                Action: [bedrock:InvokeModel, bedrock:InvokeModelWithResponseStream]
+                Resource: "*"
+              - Effect: Allow
+                Action: [logs:CreateLogGroup, logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/bedrock-agentcore/*"
+
+  FunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: lambda.amazonaws.com}
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      Policies:
+        - PolicyName: invoke-harness
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [bedrock-agentcore:InvokeHarness, bedrock-agentcore:InvokeAgentRuntime]
+                Resource: "*"
+              - Effect: Allow
+                Action: bedrock-agentcore:ListHarnesses
+                Resource: "*"
+
+  Function:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: !Ref LambdaRuntime
+      Handler: app.handler
+      Role: !GetAtt FunctionRole.Arn
+      Timeout: 120
+      MemorySize: 256
+      Code: {S3Bucket: !Ref CodeBucket, S3Key: !Ref CodeKey}
+      Environment:
+        Variables: {HARNESS_NAME: !Ref HarnessName}
+
+  Url:
+    Type: AWS::Lambda::Url
+    Properties:
+      TargetFunctionArn: !GetAtt Function.Arn
+      AuthType: NONE # public demo; add AWS_IAM or CloudFront+WAF before real use
+  UrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref Function
+      Action: lambda:InvokeFunctionUrl
+      Principal: "*"
+      FunctionUrlAuthType: NONE
+  InvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref Function
+      Action: lambda:InvokeFunction
+      Principal: "*"
+      InvokedViaFunctionUrl: true
+
+Outputs:
+  HarnessRoleArn: {Value: !GetAtt HarnessRole.Arn}
+  WebUrl: {Value: !GetAtt Url.FunctionUrl}

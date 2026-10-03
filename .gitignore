@@ -1,0 +1,6 @@
+.venv/
+build/
+__pycache__/
+*.zip
+.pytest_cache/
+.ruff_cache/

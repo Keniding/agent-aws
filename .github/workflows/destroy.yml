@@ -1,0 +1,22 @@
+name: destroy
+on: workflow_dispatch
+permissions:
+  id-token: write
+  contents: read
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+jobs:
+  destroy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.2.0
+      - uses: aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - run: uv sync --frozen
+      - run: HARNESS_NAME=agent_aws_demo uv run scripts/harness.py down
+      - run: |
+          aws cloudformation delete-stack --stack-name agent-aws-demo
+          aws cloudformation wait stack-delete-complete --stack-name agent-aws-demo

@@ -1,0 +1,49 @@
+name: deploy
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+concurrency: deploy
+permissions:
+  id-token: write # OIDC to AWS, no long-lived keys
+  contents: read
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  STACK: agent-aws-demo
+  HARNESS_NAME: agent_aws_demo
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.2.0
+      - uses: aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - run: uv sync --frozen
+      - run: uv run pytest -q
+      - run: ./scripts/package.sh
+      - name: Upload code
+        run: |
+          ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+          BUCKET="agent-aws-code-$ACCOUNT-$AWS_REGION"
+          aws s3api head-bucket --bucket "$BUCKET" 2>/dev/null || \
+            aws s3 mb "s3://$BUCKET" --region "$AWS_REGION"
+          KEY="lambda-${GITHUB_SHA}.zip"
+          aws s3 cp build/lambda.zip "s3://$BUCKET/$KEY"
+          echo "BUCKET=$BUCKET" >> "$GITHUB_ENV"; echo "KEY=$KEY" >> "$GITHUB_ENV"
+      - name: Deploy stack
+        run: |
+          aws cloudformation deploy --stack-name "$STACK" --template-file template.yaml \
+            --capabilities CAPABILITY_IAM --no-fail-on-empty-changeset \
+            --parameter-overrides LambdaRuntime="$(cat build/runtime.txt)" \
+              ModelId="${{ vars.MODEL_ID }}" HarnessName="$HARNESS_NAME" \
+              CodeBucket="$BUCKET" CodeKey="$KEY"
+      - name: Create/update harness
+        run: |
+          export HARNESS_ROLE_ARN=$(aws cloudformation describe-stacks --stack-name "$STACK" \
+            --query "Stacks[0].Outputs[?OutputKey=='HarnessRoleArn'].OutputValue" --output text)
+          MODEL_ID="${{ vars.MODEL_ID }}" uv run scripts/harness.py up
+      - name: URL
+        run: aws cloudformation describe-stacks --stack-name "$STACK" --query "Stacks[0].Outputs[?OutputKey=='WebUrl'].OutputValue" --output text
