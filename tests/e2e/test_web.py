@@ -315,7 +315,7 @@ def test_user_label_is_not_duplicated(page, me, expected):
     page.reload()
     page.locator("#who").wait_for(state="visible")
     assert page.locator("#who").inner_text() == expected
-    assert page.get_by_role("link", name="Salir").is_visible()
+    assert page.get_by_role("button", name="Salir").is_visible()
 
 
 def test_on_phones_the_list_comes_first(browser, base_url):
@@ -371,3 +371,25 @@ def test_floating_button_moves_up_when_a_notice_is_shown(browser, base_url, page
     toast, fab = pg.locator("#toast").bounding_box(), pg.locator("#fab").bounding_box()
     assert fab["y"] + fab["height"] <= toast["y"] + 1 and fab["y"] < base  # no se solapan
     ctx.close()
+
+
+def test_logout_button_posts_and_follows_the_returned_url(page, base_url):
+    """«Salir» hace POST /auth/logout (no un enlace GET) y navega a la URL de cierre que devuelve el servidor."""
+    import json
+
+    me = {"name": "Ana", "email": "ana@x.com", "local": False}
+    page.route("**/api/me", lambda r: r.fulfill(status=200, content_type="application/json", body=json.dumps(me)))
+    seen = []
+
+    def logout(route):
+        seen.append(route.request.method)
+        route.fulfill(status=200, content_type="application/json", body=json.dumps({"url": base_url + "/?cerrada=1"}))
+
+    page.route("**/auth/logout", logout)
+    page.reload()
+    btn = page.get_by_role("button", name="Salir")
+    btn.wait_for(state="visible")
+    assert page.locator("a[href='/auth/logout']").count() == 0  # ya no existe el enlace GET
+    btn.click()
+    page.wait_for_url("**/?cerrada=1")
+    assert seen == ["POST"]

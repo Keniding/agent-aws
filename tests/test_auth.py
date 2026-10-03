@@ -175,17 +175,61 @@ def test_cross_origin_writes_are_blocked(secured):
     assert mine["statusCode"] == 201
 
 
-def test_logout_clears_session_and_cognito_session(secured):
-    r = secured.handler(ev("GET", "/auth/logout"), None)
-    loc = urllib.parse.urlparse(r["headers"]["location"])
+def test_logout_is_a_post_that_clears_the_session_and_returns_the_cognito_logout_url(secured):
+    sess = f"{auth.SESSION_COOKIE}=" + auth.sign({"sub": "u", "exp": time.time() + 60})
+    r = secured.handler(ev("POST", "/auth/logout", cookies=[sess]), None)
+    assert r["statusCode"] == 200
+    loc = urllib.parse.urlparse(json.loads(r["body"])["url"])
     q = {k: v[0] for k, v in urllib.parse.parse_qs(loc.query).items()}
     assert loc.path == "/logout" and q == {"client_id": CLIENT, "logout_uri": f"https://{HOST}/auth/signed-out"}
     assert any(c.startswith(auth.SESSION_COOKIE + "=;") and "Max-Age=0" in c for c in r["cookies"])
     assert secured.handler(ev("GET", "/auth/signed-out"), None)["statusCode"] == 200
 
 
-def test_auth_routes_only_accept_get(secured):
-    assert secured.handler(ev("POST", "/auth/login"), None)["statusCode"] == 405
+def test_logout_cannot_be_triggered_with_a_get_or_cross_site(secured):
+    """OWASP CSRF: nada que cambie estado con GET; y el POST exige origen propio."""
+    assert secured.handler(ev("GET", "/auth/logout"), None)["statusCode"] == 405
+    for h in ({"sec-fetch-site": "cross-site"}, {"origin": "https://evil.example.com"}):
+        assert secured.handler(ev("POST", "/auth/logout", headers=h), None)["statusCode"] == 403
+
+
+@pytest.mark.parametrize("path", ["/auth/login", "/auth/callback", "/auth/signed-out"])
+def test_other_auth_routes_only_accept_get(secured, path):
+    assert secured.handler(ev("POST", path), None)["statusCode"] == 405
+
+
+@pytest.mark.parametrize("site,expected", [
+    ("same-origin", 201), ("none", 201), (None, 201),  # nuestra web, acción directa y navegadores sin la cabecera
+    ("cross-site", 403), ("same-site", 403),  # same-site también: en *.on.aws puede ser otro inquilino
+])
+def test_fetch_metadata_is_enforced_on_writes(secured, site, expected):
+    """OWASP: Sec-Fetch-Site es la defensa moderna más útil contra CSRF en peticiones no seguras."""
+    sess = f"{auth.SESSION_COOKIE}=" + auth.sign({"sub": "u", "exp": time.time() + 60})
+    headers = {"sec-fetch-site": site} if site else {}
+    r = secured.handler(ev("POST", "/api/incidents", {"title": "x"}, cookies=[sess], headers=headers), None)
+    assert r["statusCode"] == expected
+
+
+def test_reads_are_not_blocked_by_fetch_metadata(secured):
+    sess = f"{auth.SESSION_COOKIE}=" + auth.sign({"sub": "u", "exp": time.time() + 60})
+    r = secured.handler(ev("GET", "/api/incidents", cookies=[sess], headers={"sec-fetch-site": "cross-site"}), None)
+    assert r["statusCode"] == 200  # las lecturas son seguras; el navegador además impide que otra web lea la respuesta
+
+
+def test_security_headers_are_on_every_response(secured):
+    sess = f"{auth.SESSION_COOKIE}=" + auth.sign({"sub": "u", "exp": time.time() + 60, "name": "n"})
+    responses = [secured.handler(ev("GET", "/"), None),                                   # redirección al login
+                 secured.handler(ev("GET", "/", cookies=[sess]), None),                   # la web
+                 secured.handler(ev("GET", "/api/me", cookies=[sess]), None),             # API
+                 secured.handler(ev("GET", "/api/incidents"), None),                      # 401
+                 secured.handler(ev("GET", "/auth/login"), None),                         # login
+                 secured.handler(ev("GET", "/auth/signed-out"), None)]                    # página de auth
+    for r in responses:
+        h = {k.lower(): v for k, v in r["headers"].items()}
+        assert h["x-content-type-options"] == "nosniff" and h["x-frame-options"] == "DENY"
+        assert "frame-ancestors 'none'" in h["content-security-policy"] and "base-uri 'none'" in h["content-security-policy"]
+        assert h["referrer-policy"] == "strict-origin-when-cross-origin" and h["cache-control"] == "no-store"
+        assert h["strict-transport-security"].startswith("max-age=") and h["cross-origin-opener-policy"] == "same-origin"
 
 
 def test_local_mode_has_no_login(app):

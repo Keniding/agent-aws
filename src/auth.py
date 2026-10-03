@@ -106,8 +106,18 @@ def session(event):
 
 
 def same_origin(event) -> bool:
-    """Defensa extra contra CSRF en peticiones que modifican datos (además de SameSite=Lax)."""
-    origin = (event.get("headers") or {}).get("origin")
+    """Defensa en profundidad contra CSRF en peticiones que modifican datos (además de SameSite=Lax).
+
+    OWASP (CSRF Prevention Cheat Sheet): Fetch Metadata es la comprobación moderna más útil (el navegador pone
+    `Sec-Fetch-Site` y la página no puede falsearlo); `Origin` cubre navegadores sin Fetch Metadata. Solo se
+    admiten `same-origin` (nuestra web) y `none` (acción directa del usuario); `same-site` también se rechaza
+    porque en un dominio compartido como *.on.aws un «mismo sitio» puede ser otro inquilino.
+    """
+    headers = event.get("headers") or {}
+    site = headers.get("sec-fetch-site")
+    if site is not None and site not in ("same-origin", "none"):
+        return False
+    origin = headers.get("origin")
     return not origin or urllib.parse.urlparse(origin).netloc == event["requestContext"]["domainName"]
 
 
@@ -185,24 +195,32 @@ def _callback(event) -> dict:
 
 
 def _logout(event) -> dict:
-    """Cierra la sesión propia y la de Cognito (si no, «volver a entrar» sería automático)."""
+    """Borra la cookie de sesión y devuelve la URL de cierre de Cognito (si no se cierra también allí, «volver a
+    entrar» sería automático). Es un POST: OWASP exige que nada que cambie estado se haga con GET (evita que otra
+    web te cierre la sesión con un simple enlace o imagen). La web navega a la URL devuelta."""
     query = urllib.parse.urlencode({"client_id": client_id(),
                                     "logout_uri": _origin(event) + "/auth/signed-out"})
-    return redirect(f"{_base()}/logout?{query}", [_set_cookie(SESSION_COOKIE, "", 0)])
+    return {"statusCode": 200, "headers": {"content-type": "application/json", "cache-control": "no-store"},
+            "cookies": [_set_cookie(SESSION_COOKIE, "", 0)],
+            "body": json.dumps({"url": f"{_base()}/logout?{query}"})}
 
 
 def route(event, method, path) -> dict:
-    """Rutas /auth/*: login, callback, logout y pantalla de sesión cerrada."""
-    if method != "GET":
-        return page(405, "Método no permitido", "")
+    """Rutas /auth/*: login, callback y signed-out (GET) y logout (POST)."""
     if not configured():
         return page(503, "Autenticación no configurada", "Falta configurar Amazon Cognito.")
+    if path == "/auth/logout":
+        if method != "POST":
+            return page(405, "Método no permitido", "Para salir usa el botón «Salir» de la aplicación.")
+        if not same_origin(event):
+            return page(403, "Origen no permitido", "")
+        return _logout(event)
+    if method != "GET":
+        return page(405, "Método no permitido", "")
     if path == "/auth/login":
         return _login(event)
     if path == "/auth/callback":
         return _callback(event)
-    if path == "/auth/logout":
-        return _logout(event)
     if path == "/auth/signed-out":
         return page(200, "Sesión cerrada", '<a href="/auth/login">Volver a entrar</a>')
     return page(404, "No encontrado", "")

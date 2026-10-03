@@ -44,8 +44,8 @@ Resources:
         - PolicyName: harness
           PolicyDocument:
             Version: "2012-10-17"
-            # Subconjunto de AmazonBedrockAgentCoreHarnessExecutionPolicy (la que crea la consola),
-            # sin navegador, EFS, S3 Files ni memoria, que este harness no usa.
+            # Subconjunto de AmazonBedrockAgentCoreHarnessExecutionPolicy (la que crea la consola) y de la política de
+            # ejemplo de la documentación (harness-security); se omiten navegador, intérprete de código, EFS y S3 Files.
             Statement:
               - Effect: Allow
                 Action: [bedrock:InvokeModel, bedrock:InvokeModelWithResponseStream]
@@ -103,7 +103,8 @@ Resources:
             Statement:
               - Effect: Allow
                 Action: [bedrock-agentcore:InvokeHarness, bedrock-agentcore:InvokeAgentRuntime]
-                Resource: "*"
+                # Según la documentación (harness-security): InvokeHarness exige ambas acciones sobre el ARN del harness
+                Resource: !Sub "arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:harness/${HarnessName}-*"
               - Effect: Allow
                 Action: bedrock-agentcore:ListHarnesses
                 Resource: "*"

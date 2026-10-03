@@ -13,7 +13,8 @@ import auth
 MAX_CHARS = int(os.environ.get("MAX_MESSAGE_CHARS", "2000"))
 HARNESS_NAME = os.environ["HARNESS_NAME"]
 TABLE = os.environ["TABLE_NAME"]
-SESSION_RE = re.compile(r"^[A-Za-z0-9_-]{33,128}$")  # el harness exige >= 33 caracteres
+# InvokeHarness: runtimeSessionId de 33 a 100 caracteres y debe empezar por letra o número (API_InvokeHarness)
+SESSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{32,99}$")
 STATUSES = {"abierta", "en_curso", "resuelta"}
 
 _runtime = boto3.client("bedrock-agentcore")
@@ -39,7 +40,8 @@ NEW_INCIDENT_PROMPT = (
 def _tool(name, description, props, required):
     return {"type": "inline_function", "name": name, "config": {"inlineFunction": {
         "description": description,
-        "inputSchema": {"json": {"type": "object", "properties": props, "required": required}}}}}
+        # JSON Schema directo (HarnessInlineFunctionConfig.inputSchema), sin envoltorio {"json": ...}
+        "inputSchema": {"type": "object", "properties": props, "required": required}}}}
 
 
 TOOLS = [
@@ -185,8 +187,19 @@ def ask(session_id: str, text: str, actor: str | None = None):
 
 
 def list_incidents() -> list:
-    items = _table.scan()["Items"]
-    return sorted(items, key=lambda i: i["created_at"], reverse=True)
+    """Todas las incidencias, de la más reciente a la más antigua.
+
+    Scan devuelve como máximo 1 MB por página (LastEvaluatedKey) y, por defecto, lecturas eventualmente
+    consistentes (docs de DynamoDB: bp-query-scan, WorkingWithItems). Se pagina y se pide lectura fuerte para que
+    la lista refleje lo que el agente acaba de escribir.
+    """
+    items, kw = [], {"ConsistentRead": True}
+    while True:
+        page = _table.scan(**kw)
+        items += page["Items"]
+        if "LastEvaluatedKey" not in page:
+            return sorted(items, key=lambda i: i["created_at"], reverse=True)
+        kw["ExclusiveStartKey"] = page["LastEvaluatedKey"]
 
 
 def new_item(title: str, description: str) -> dict:
@@ -201,7 +214,7 @@ def create_incident(title: str, description: str) -> dict:
     try:
         _, actions = ask(str(uuid.uuid4()), NEW_INCIDENT_PROMPT.format(
             id=item["id"], title=title, description=description))
-        item = _table.get_item(Key={"id": item["id"]})["Item"]
+        item = _table.get_item(Key={"id": item["id"]}, ConsistentRead=True)["Item"]  # el agente acaba de escribir
         item["actions"] = actions
     except Exception as exc:  # noqa: BLE001
         print("triage failed:", repr(exc))
@@ -232,7 +245,26 @@ def _text(value, limit) -> str:
     return str(value or "").strip()[:limit]
 
 
-def handler(event, _context):
+# Cabeceras recomendadas por OWASP (HTTP Headers Cheat Sheet). CSP completa (script/style) pendiente: la web
+# usa script y estilos en línea; aquí solo se fijan directivas que no los afectan.
+SECURITY_HEADERS = {
+    "x-content-type-options": "nosniff",
+    "referrer-policy": "strict-origin-when-cross-origin",
+    "x-frame-options": "DENY",
+    "content-security-policy": "frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+    "strict-transport-security": "max-age=63072000; includeSubDomains",
+    "cross-origin-opener-policy": "same-origin",
+    "cache-control": "no-store",
+}
+
+
+def handler(event, context):
+    resp = _handle(event, context)
+    resp["headers"] = {**SECURITY_HEADERS, **resp.get("headers", {})}  # lo que fije cada respuesta manda
+    return resp
+
+
+def _handle(event, _context):
     http = event["requestContext"]["http"]
     method, path = http["method"], event.get("rawPath", "/")
     if path.startswith("/auth/"):

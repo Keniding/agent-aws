@@ -267,3 +267,43 @@ def test_registration_date_is_available_to_the_agent(app, monkeypatch):
     assert app.run_tool("listar_incidencias", {})["incidencias"][0]["registrada"] == "2026-10-03 07:02 UTC"
     assert "registrada 2026-10-03 07:02 UTC" in app.snapshot()
     assert inc["created_at"] == 1791010941
+
+
+def test_session_id_follows_the_invokeharness_contract(app):
+    """API_InvokeHarness: 33..100 caracteres, empieza por letra o número, solo [a-zA-Z0-9-_]."""
+    def chat(sid):
+        return call(app, "POST", "/api/chat", {"message": "hola", "session_id": sid})[0]
+
+    assert chat("a" * 33) == 200 and chat("a" * 100) == 200 and chat("0" + "-_" * 20) == 200
+    assert chat("a" * 32) == 400 and chat("a" * 101) == 400  # AWS rechazaría 101+ (antes se aceptaban hasta 128)
+    assert chat("-" + "a" * 40) == 400 and chat("_" + "a" * 40) == 400  # debe empezar por alfanumérico
+    assert chat("a" * 40 + " ") == 400 and chat("a" * 39 + "ñ") == 400
+
+
+def test_inline_function_schemas_are_plain_json_schema(app):
+    """HarnessInlineFunctionConfig.inputSchema es un JSON Schema directo, sin envoltorio {"json": ...}."""
+    for t in app.TOOLS:
+        cfg = t["config"]["inlineFunction"]
+        assert t["type"] == "inline_function" and 1 <= len(cfg["description"]) <= 4096
+        assert cfg["inputSchema"]["type"] == "object" and "json" not in cfg["inputSchema"]
+        assert set(cfg["inputSchema"]["required"]) <= set(cfg["inputSchema"]["properties"])
+
+
+def test_list_reads_every_page_of_the_scan_with_consistent_reads(app, monkeypatch):
+    """Scan devuelve ≤1 MB por página: con ~700 incidencias de 2000 caracteres hacen falta varias páginas."""
+    big = "d" * 2000
+    for n in range(700):
+        app._table.put_item(Item={"id": f"{n:032x}", "title": f"t{n}", "description": big, "status": "abierta",
+                                  "created_at": n, "severity": "baja", "category": "", "summary": "", "next_steps": []})
+    calls = []
+    real = app._table.scan
+
+    def spy(**kw):
+        calls.append(kw)
+        return real(**kw)
+
+    monkeypatch.setattr(app._table, "scan", spy)
+    items = app.list_incidents()
+    assert len(calls) > 1 and len(items) == 700  # antes: solo la primera página
+    assert all(c.get("ConsistentRead") is True for c in calls)
+    assert [i["created_at"] for i in items[:3]] == [699, 698, 697]  # sigue ordenada de más reciente a más antigua

@@ -51,7 +51,7 @@ header h1 span{color:var(--color-carbon-ink)}
 header p{font:italic 400 17px/24px var(--display);margin:0;color:var(--on-accent-field)}
 .bar{display:flex;align-items:center;gap:var(--space-2) var(--space-4);flex-wrap:wrap}
 .user{display:flex;align-items:center;gap:var(--space-2);font:600 14px/20px var(--sans)}
-header .themes button,header .user a{min-height:32px;padding:4px 10px;font-size:11px;line-height:16px;border-radius:0;
+header .themes button,header .user button{min-height:32px;padding:4px 10px;font-size:11px;line-height:16px;border-radius:0;
  background:var(--color-bone-parchment);color:var(--color-carbon-ink);border:1px solid var(--color-carbon-ink);
  text-decoration:none;font-weight:600;letter-spacing:.08em;text-transform:uppercase;display:inline-flex;align-items:center}
 header .themes button+button{margin-left:-1px}
@@ -180,7 +180,7 @@ summary{cursor:pointer;font:600 14px/22px var(--sans);color:var(--ink-muted)}
 <header>
  <div class="brand"><h1>Inciden<span>cias</span></h1><p>Dile al agente qué pasa; él se encarga.</p></div>
  <div class="bar">
-  <div class="user"><span id="who" hidden></span><a id="out" href="/auth/logout" hidden>Salir</a></div>
+  <div class="user"><span id="who" hidden></span><button id="out" type="button" hidden>Salir</button></div>
   <nav class="themes" aria-label="Tema"><span class="label">Tema</span>
    <button class="ghost" data-theme="auto" aria-pressed="true">Auto</button>
    <button class="ghost" data-theme="light" aria-pressed="false">Papel</button>
@@ -398,6 +398,8 @@ const calm=matchMedia('(prefers-reduced-motion: reduce)');
 $('fab').onclick=()=>{$('agentcard').scrollIntoView({block:'start',behavior:calm.matches?'auto':'smooth'});
  setTimeout(()=>$('m').focus({preventScroll:true}),calm.matches?0:400)};
 try{new IntersectionObserver(([e])=>{$('fab').hidden=e.isIntersecting},{threshold:.15}).observe($('agentcard'))}catch{}
+/* Salir: POST (nada que cambie estado va por GET); el servidor borra la cookie y devuelve la URL de cierre de Cognito */
+$("out").onclick=async()=>{try{const r=await fetch("/auth/logout",{method:"POST"});location.href=(await r.json()).url}catch{location.href="/"}};
 api("/api/me").then(m=>{try{if(localStorage.getItem("who")!==m.email){if(localStorage.getItem("who")!==null)resetConversation();localStorage.setItem("who",m.email)}}catch{}
  renderThread();if(!m.local){$("who").textContent=(m.name&&m.name!==m.email)?m.name+" · "+m.email:(m.email||m.name);$("who").hidden=false;$("out").hidden=false}}).catch(()=>{});
 load();
