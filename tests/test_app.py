@@ -23,7 +23,8 @@ def test_create_triages_and_persists(app):
     status, inc = call(app, "POST", "/api/incidents",
                        {"title": "Caída de la BD", "description": "no responde"})
     assert status == 201
-    assert inc["severity"] == "critica" and inc["status"] == "abierta"
+    assert inc["severity"] == "critica" and inc["status"] == "en_curso"  # el agente la pasó a en_curso
+    assert [a["tool"] for a in inc["actions"]] == ["clasificar_incidencia", "cambiar_estado"]
     assert inc["next_steps"] == ["Revisar logs", "Avisar al equipo"]
     _, items = call(app, "GET", "/api/incidents")
     assert [i["id"] for i in items] == [inc["id"]]
@@ -78,13 +79,20 @@ def test_validation(app):
     assert call(app, "GET", "/nada")[0] == 404
 
 
-def test_chat_includes_only_open_incidents(app):
+def test_chat_agent_lists_only_open_incidents(app):
+    """El agente pide listar_incidencias y recibe solo las abiertas; la app le devuelve el resultado."""
     seen = {}
 
     class Spy:
-        def invoke_harness(self, harnessArn, runtimeSessionId, messages):
-            seen["text"] = messages[0]["content"][0]["text"]
-            seen["sid"] = runtimeSessionId
+        def __init__(self):
+            self.n = 0
+
+        def invoke_harness(self, harnessArn, runtimeSessionId, messages, tools=None):
+            self.n += 1
+            seen["tools"] = [t["name"] for t in tools]
+            if self.n == 1:
+                return {"stream": local.FakeToolStream("listar_incidencias", {})}
+            seen["result"] = messages[0]["content"][0]["toolResult"]
             return {"stream": local.FakeStream("ok")}
 
     call(app, "POST", "/api/incidents", {"title": "ABIERTA-UNO"})
@@ -93,8 +101,51 @@ def test_chat_includes_only_open_incidents(app):
     app._runtime = Spy()
     status, out = call(app, "POST", "/api/chat", {"message": "¿qué atiendo?"})
     assert status == 200 and out["reply"] == "ok" and len(out["session_id"]) >= 33
-    assert "ABIERTA-UNO" in seen["text"] and "CERRADA-DOS" not in seen["text"]
-    assert seen["sid"] == out["session_id"]
+    assert out["actions"] == [{"tool": "listar_incidencias", "ok": True}]
+    res = seen["result"]
+    assert res["status"] == "success" and "content" in res and "json" not in res["content"][0]
+    assert "ABIERTA-UNO" in res["content"][0]["text"] and "CERRADA-DOS" not in res["content"][0]["text"]
+    assert seen["tools"] == ["listar_incidencias", "clasificar_incidencia", "cambiar_estado"]
+
+
+def test_agent_tool_errors_go_back_to_the_agent(app):
+    """Entrada inválida del modelo no rompe nada: el error vuelve como toolResult de error."""
+    seen = []
+
+    class Bad:
+        def __init__(self):
+            self.n = 0
+
+        def invoke_harness(self, harnessArn, runtimeSessionId, messages, tools=None):
+            self.n += 1
+            if self.n == 1:
+                return {"stream": local.FakeToolStream("clasificar_incidencia", {
+                    "id": "0" * 32, "severidad": "apocaliptica", "categoria": "x", "resumen": "y"})}
+            if self.n == 2:
+                seen.append(messages[0]["content"][0]["toolResult"])
+                return {"stream": local.FakeToolStream("cambiar_estado", {"id": "no", "estado": "x"})}
+            seen.append(messages[0]["content"][0]["toolResult"])
+            return {"stream": local.FakeStream("fin")}
+
+    app._runtime = Bad()
+    status, out = call(app, "POST", "/api/chat", {"message": "haz algo raro"})
+    assert status == 200 and out["reply"] == "fin"
+    assert [s["status"] for s in seen] == ["error", "error"]
+    assert out["actions"] == [{"tool": "clasificar_incidencia", "ok": False},
+                              {"tool": "cambiar_estado", "ok": False}]
+
+
+def test_agent_loop_is_bounded(app):
+    class Loop:
+        n = 0
+
+        def invoke_harness(self, **_):
+            Loop.n += 1
+            return {"stream": local.FakeToolStream("listar_incidencias", {})}
+
+    app._runtime = Loop()
+    status, _ = call(app, "POST", "/api/chat", {"message": "bucle"})
+    assert status == 200 and Loop.n == app.MAX_STEPS
 
 
 def test_chat_error_exposes_only_class(app):

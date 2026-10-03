@@ -165,13 +165,13 @@ async function load(){try{items=await api('/api/incidents');render()}catch(e){$(
 document.querySelectorAll('#filters [data-f]').forEach(b=>b.onclick=()=>{filter=b.dataset.f;render()});
 
 $('new').onsubmit=async e=>{e.preventDefault();const b=$('go');b.disabled=true;$('ns').textContent='Clasificando…';
- try{await api('/api/incidents','POST',{title:$('t').value,description:$('d').value});$('new').reset();$('ns').textContent='Registrada.';await load()}
+ try{await api('/api/incidents','POST',{title:$('t').value,description:$('d').value});$('new').reset();$('ns').textContent='Registrada y gestionada por el agente.';await load()}
  catch(x){$('ns').textContent='';$('ns').append(el('span','err','Error: '+x.message))}finally{b.disabled=false}};
 $('chat').onsubmit=async e=>{e.preventDefault();const q=$('m').value,b=$('send');$('m').value='';b.disabled=true;
  const log=$('log');if(!log.querySelector('.msg'))log.replaceChildren();
  const u=el('div','msg');u.append(el('div','label muted','Tú //'),el('div',null,q));
  const a=el('div','msg');const t=el('div',null,'…');a.append(el('div','label muted','Asistente //'),t);log.append(u,a);
- try{const j=await api('/api/chat','POST',{message:q,session_id:sid});sid=j.session_id;try{localStorage.setItem('sid',sid)}catch{}t.textContent=j.reply}
+ try{const j=await api('/api/chat','POST',{message:q,session_id:sid});sid=j.session_id;try{localStorage.setItem('sid',sid)}catch{}t.textContent=j.reply;if(j.actions&&j.actions.length){const p=el('div','muted',j.actions.map(x=>(x.ok?'✓ ':'✗ ')+x.tool).join('  ·  '));p.style.fontFamily='var(--mono,monospace)';p.style.fontSize='12px';a.append(p)}}
  catch(x){t.className='err';t.textContent='Error: '+x.message}finally{b.disabled=false}};
 load();
 </script></body></html>

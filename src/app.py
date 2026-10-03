@@ -22,13 +22,37 @@ _arn = None
 with open(os.path.join(os.path.dirname(__file__), "index.html"), encoding="utf-8") as f:
     PAGE = f.read()
 
-TRIAGE_PROMPT = (
-    "Clasifica esta incidencia. Responde SOLO un objeto JSON con las claves: "
-    '"severity" (baja|media|alta|critica), "category" (texto corto), '
-    '"summary" (una frase), "next_steps" (lista de hasta 3 acciones).\n\n'
-    "Título: {title}\nDescripción: {description}"
+SEVERITIES = ["baja", "media", "alta", "critica"]
+MAX_STEPS = 6  # vueltas máximas del bucle agente <-> herramientas por petición
+ID_RE = re.compile(r"^[0-9a-f]{32}$")
+
+NEW_INCIDENT_PROMPT = (
+    "Ha entrado una incidencia nueva (id {id}).\nTítulo: {title}\nDescripción: {description}\n\n"
+    "Gestiónala tú: llama a clasificar_incidencia con su severidad, categoría, resumen y hasta 3 "
+    "próximos pasos. Si es crítica, llama además a cambiar_estado para ponerla en_curso. "
+    "Cuando termines, responde con una frase."
 )
 
+
+def _tool(name, description, props, required):
+    return {"type": "inline_function", "name": name, "config": {"inlineFunction": {
+        "description": description,
+        "inputSchema": {"json": {"type": "object", "properties": props, "required": required}}}}}
+
+
+TOOLS = [
+    _tool("listar_incidencias", "Lista las incidencias (id, título, severidad, estado, resumen). "
+          "Sin filtro devuelve solo las no resueltas.",
+          {"estado": {"type": "string", "enum": sorted(STATUSES)}}, []),
+    _tool("clasificar_incidencia", "Guarda la clasificación de una incidencia.",
+          {"id": {"type": "string"}, "severidad": {"type": "string", "enum": SEVERITIES},
+           "categoria": {"type": "string"}, "resumen": {"type": "string"},
+           "proximos_pasos": {"type": "array", "items": {"type": "string"}}},
+          ["id", "severidad", "categoria", "resumen"]),
+    _tool("cambiar_estado", "Cambia el estado de una incidencia.",
+          {"id": {"type": "string"}, "estado": {"type": "string", "enum": sorted(STATUSES)}},
+          ["id", "estado"]),
+]
 
 def harness_arn() -> str:
     global _arn
@@ -42,34 +66,89 @@ def harness_arn() -> str:
     return _arn
 
 
-def ask(session_id: str, text: str) -> str:
-    resp = _runtime.invoke_harness(
-        harnessArn=harness_arn(),
-        runtimeSessionId=session_id,
-        messages=[{"role": "user", "content": [{"text": text}]}],
-    )
-    out = []
+def _short(i: dict) -> dict:
+    return {"id": i["id"], "titulo": i["title"], "severidad": i.get("severity", "sin_clasificar"),
+            "estado": i["status"], "resumen": i.get("summary", "")}
+
+
+def run_tool(name: str, args: dict) -> dict:
+    """Ejecuta una herramienta pedida por el agente. Valida todo: la entrada viene de un modelo."""
+    if name == "listar_incidencias":
+        est = args.get("estado")
+        items = list_incidents()
+        items = [i for i in items if (i["status"] == est if est in STATUSES else i["status"] != "resuelta")]
+        return {"incidencias": [_short(i) for i in items[:30]]}
+    iid = str(args.get("id", ""))
+    if not ID_RE.match(iid):
+        raise ValueError("id inválido")
+    if name == "clasificar_incidencia":
+        sev = args.get("severidad")
+        if sev not in SEVERITIES:
+            raise ValueError(f"severidad debe ser una de {SEVERITIES}")
+        steps = args.get("proximos_pasos")
+        steps = [str(s)[:200] for s in steps][:3] if isinstance(steps, list) else []
+        r = _update(iid, "SET severity = :v, category = :c, summary = :m, next_steps = :n",
+                    {":v": sev, ":c": _text(args.get("categoria"), 60),
+                     ":m": _text(args.get("resumen"), 300), ":n": steps})
+        return _short(r)
+    if name == "cambiar_estado":
+        if args.get("estado") not in STATUSES:
+            raise ValueError(f"estado debe ser uno de {sorted(STATUSES)}")
+        return _short(_update(iid, "SET #s = :s", {":s": args["estado"]}, {"#s": "status"}))
+    raise ValueError(f"herramienta desconocida: {name}")
+
+
+def _update(iid, expr, values, names=None):
+    kw = {"ExpressionAttributeNames": names} if names else {}
+    try:
+        return _table.update_item(
+            Key={"id": iid}, UpdateExpression=expr, ConditionExpression="attribute_exists(id)",
+            ExpressionAttributeValues=values, ReturnValues="ALL_NEW", **kw)["Attributes"]
+    except _table.meta.client.exceptions.ConditionalCheckFailedException:
+        raise ValueError("la incidencia no existe") from None
+
+
+def invoke(session_id: str, messages: list):
+    """Una vuelta al harness: devuelve (texto, llamadas a herramientas, motivo de parada)."""
+    resp = _runtime.invoke_harness(harnessArn=harness_arn(), runtimeSessionId=session_id,
+                                   messages=messages, tools=TOOLS)
+    text, calls, cur, stop = [], [], None, None
     for event in resp["stream"]:
+        tu = event.get("contentBlockStart", {}).get("start", {}).get("toolUse")
+        if tu:
+            cur = {"id": tu["toolUseId"], "name": tu["name"], "input": ""}
+            calls.append(cur)
         delta = event.get("contentBlockDelta", {}).get("delta", {})
         if "text" in delta:
-            out.append(delta["text"])
+            text.append(delta["text"])
+        if "toolUse" in delta and cur is not None:
+            cur["input"] += delta["toolUse"].get("input", "")
+        if "messageStop" in event:
+            stop = event["messageStop"].get("stopReason")
     # Nemotron emite su razonamiento antes de </think>: solo interesa la respuesta final.
-    return "".join(out).rsplit("</think>", 1)[-1].strip()
+    return "".join(text).rsplit("</think>", 1)[-1].strip(), calls, stop
 
 
-def parse_triage(text: str) -> dict:
-    m = re.search(r"\{.*\}", text, re.DOTALL)
-    try:
-        data = json.loads(m.group(0)) if m else {}
-    except json.JSONDecodeError:
-        data = {}
-    steps = data.get("next_steps")
-    return {
-        "severity": str(data.get("severity", "sin_clasificar")),
-        "category": str(data.get("category", "")),
-        "summary": str(data.get("summary", "")),
-        "next_steps": [str(s) for s in steps][:3] if isinstance(steps, list) else [],
-    }
+def ask(session_id: str, text: str):
+    """Bucle del agente: el harness decide, aquí se ejecutan sus herramientas. -> (respuesta, acciones)."""
+    messages, actions, reply = [{"role": "user", "content": [{"text": text}]}], [], ""
+    for _ in range(MAX_STEPS):
+        reply, calls, stop = invoke(session_id, messages)
+        if stop != "tool_use" or not calls:
+            break
+        results = []
+        for c in calls:
+            try:
+                args = json.loads(c["input"] or "{}")
+                out, status = run_tool(c["name"], args if isinstance(args, dict) else {}), "success"
+            except Exception as exc:  # noqa: BLE001 - el error vuelve al agente para que se corrija
+                args, out, status = {}, {"error": str(exc)}, "error"
+            actions.append({"tool": c["name"], "ok": status == "success"})
+            results.append({"toolResult": {"toolUseId": c["id"], "status": status,
+                                           # solo texto: el eco con 'json' rompe el parser de boto3
+                                           "content": [{"text": json.dumps(out, default=int)}]}})
+        messages = [{"role": "user", "content": results}]
+    return reply, actions
 
 
 def list_incidents() -> list:
@@ -79,22 +158,21 @@ def list_incidents() -> list:
 
 def create_incident(title: str, description: str) -> dict:
     item = {"id": uuid.uuid4().hex, "title": title, "description": description,
-            "status": "abierta", "created_at": int(time.time())}
+            "status": "abierta", "created_at": int(time.time()),
+            "severity": "sin_clasificar", "category": "", "summary": "", "next_steps": []}
+    _table.put_item(Item=item)  # primero se guarda: si el agente falla, la incidencia no se pierde
     try:
-        item.update(parse_triage(ask(str(uuid.uuid4()),
-                                     TRIAGE_PROMPT.format(title=title, description=description))))
-    except Exception as exc:  # noqa: BLE001 - la incidencia se guarda aunque falle el asistente
+        _, actions = ask(str(uuid.uuid4()), NEW_INCIDENT_PROMPT.format(
+            id=item["id"], title=title, description=description))
+        item = _table.get_item(Key={"id": item["id"]})["Item"]
+        item["actions"] = actions
+    except Exception as exc:  # noqa: BLE001
         print("triage failed:", repr(exc))
-        item["severity"] = "sin_clasificar"
-    _table.put_item(Item=item)
     return item
 
 
-def chat(session_id: str, message: str) -> str:
-    open_ = [i for i in list_incidents() if i["status"] != "resuelta"][:20]
-    ctx = "\n".join(f"- [{i['id'][:8]}] {i['severity']} · {i['status']} · {i['title']}"
-                    for i in open_) or "(ninguna)"
-    return ask(session_id, f"Incidencias abiertas:\n{ctx}\n\nPregunta: {message}")
+def chat(session_id: str, message: str):
+    return ask(session_id, message)
 
 
 def _json(status: int, body) -> dict:
@@ -148,7 +226,8 @@ def handler(event, _context):
         if not SESSION_RE.match(sid):
             return _json(400, {"error": "session_id inválido"})
         try:
-            return _json(200, {"session_id": sid, "reply": chat(sid, message)})
+            reply, actions = chat(sid, message)
+            return _json(200, {"session_id": sid, "reply": reply, "actions": actions})
         except Exception as exc:  # noqa: BLE001 - solo exponemos la clase del error
             print("chat failed:", repr(exc))
             return _json(502, {"error": type(exc).__name__})

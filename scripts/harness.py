@@ -41,7 +41,7 @@ def up():
             "modelId": os.environ.get("MODEL_ID") or "nvidia.nemotron-nano-9b-v2",
             "apiFormat": os.environ.get("API_FORMAT") or "chat_completions",
         }},
-        "systemPrompt": [{"text": "Eres el asistente de un sistema de incidencias de TI. Clasificas severidad, propones próximos pasos y respondes dudas sobre las incidencias abiertas que se te indiquen. Sé breve y concreto; responde en español."}],
+        "systemPrompt": [{"text": "Eres un agente que gestiona un sistema de incidencias de TI. No te limites a opinar: actúa con tus herramientas. Usa listar_incidencias para ver el estado real antes de responder sobre incidencias, clasificar_incidencia para guardar la clasificación de una incidencia nueva y cambiar_estado cuando el usuario o el flujo lo pida. Nunca inventes ids: usa los que te devuelva listar_incidencias. Responde en español, breve y concreto, sin repetir tu razonamiento."}],
         "maxIterations": 10,
         "timeoutSeconds": 100,
     }

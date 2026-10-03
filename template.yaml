@@ -102,7 +102,7 @@ Resources:
                 Action: bedrock-agentcore:ListHarnesses
                 Resource: "*"
               - Effect: Allow
-                Action: [dynamodb:Scan, dynamodb:PutItem, dynamodb:UpdateItem]
+                Action: [dynamodb:Scan, dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem]
                 Resource: !GetAtt IncidentsTable.Arn
 
   Function:
@@ -111,7 +111,7 @@ Resources:
       Runtime: !Ref LambdaRuntime
       Handler: app.handler
       Role: !GetAtt FunctionRole.Arn
-      Timeout: 120
+      Timeout: 240
       MemorySize: 256
       Code: {S3Bucket: !Ref CodeBucket, S3Key: !Ref CodeKey}
       Environment:

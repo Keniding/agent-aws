@@ -54,16 +54,16 @@ def test_full_flow(page):
     assert "Caída del servicio de pagos" in card.inner_text()
     assert card.locator(".sev").inner_text().lower() == "crítica"
     assert "Revisar logs" in card.inner_text()
-    assert "Abiertas 1 // En curso 0 // Resueltas 0" in page.locator("#counts").text_content()
+    # la crítica la pasó el agente a en_curso con su herramienta cambiar_estado
+    assert "Abiertas 0 // En curso 1 // Resueltas 0" in page.locator("#counts").text_content()
 
-    card.get_by_label("Estado de Caída del servicio de pagos").select_option("en_curso")
-    page.wait_for_function("document.querySelector('#counts').textContent.includes('En curso 1')")
+    card.get_by_label("Estado de Caída del servicio de pagos").select_option("resuelta")
+    page.wait_for_function("document.querySelector('#counts').textContent.includes('Resueltas 1')")
 
-    page.get_by_role("button", name="Resueltas").click()
-    assert page.locator("article.inc").count() == 0
     page.get_by_role("button", name="En curso").click()
+    assert page.locator("article.inc").count() == 0
+    page.get_by_role("button", name="Resueltas").click()
     assert page.locator("article.inc").count() == 1
-
     page.reload()  # persistencia en DynamoDB
     assert page.locator("article.inc").count() == 1
 
