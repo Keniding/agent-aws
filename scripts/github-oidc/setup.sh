@@ -10,7 +10,8 @@ REPO=Keniding/agent-aws
 ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
 PROVIDER="arn:aws:iam::$ACCOUNT:oidc-provider/token.actions.githubusercontent.com"
 render() { sed "s/__ACCOUNT__/$ACCOUNT/g" "$1" > "$2"; }
-TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
+TMP=.rendered  # carpeta relativa: el aws de Windows no entiende las rutas /tmp de Git Bash
+mkdir -p "$TMP"; trap 'rm -rf "$TMP"' EXIT
 render trust.json "$TMP/trust.json"; render perms.json "$TMP/perms.json"
 
 echo "Cuenta: $ACCOUNT"
