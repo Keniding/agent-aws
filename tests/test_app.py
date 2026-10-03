@@ -259,3 +259,11 @@ def test_chat_registers_an_incident_end_to_end(app):
     assert status == 200 and out["actions"] == [{"tool": "crear_incidencia", "ok": True}]
     _, items = call(app, "GET", "/api/incidents")
     assert [i["title"] for i in items] == ["la impresora no imprime"]
+
+
+def test_registration_date_is_available_to_the_agent(app, monkeypatch):
+    monkeypatch.setattr(app.time, "time", lambda: 1791010941)  # 2026-10-03 07:02:21 UTC
+    _, inc = call(app, "POST", "/api/incidents", {"title": "Wifi lenta"})
+    assert app.run_tool("listar_incidencias", {})["incidencias"][0]["registrada"] == "2026-10-03 07:02 UTC"
+    assert "registrada 2026-10-03 07:02 UTC" in app.snapshot()
+    assert inc["created_at"] == 1791010941

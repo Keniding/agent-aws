@@ -52,7 +52,7 @@ main{display:grid;gap:var(--space-8);padding:var(--space-8);max-width:880px;marg
 .card{background:var(--surface-raised);border:1px solid var(--rule);padding:var(--space-4)}
 .card h2{font:500 30px/36px var(--display);margin:var(--space-1) 0 var(--space-4)}
 label{display:block;margin-top:var(--space-4)}
-input[type=text],textarea{display:block;width:100%;font:inherit;color:var(--ink);background:var(--surface);
+input[type=text],input[type=date],textarea{display:block;width:100%;font:inherit;color:var(--ink);background:var(--surface);
  border:1px solid var(--rule);border-radius:2px;padding:var(--space-2);margin-top:var(--space-1)}
 textarea{resize:vertical}
 button{font:600 12px/16px var(--sans);letter-spacing:.08em;text-transform:uppercase;cursor:pointer;
@@ -110,6 +110,11 @@ details{margin-top:var(--space-4)}
 summary{cursor:pointer;font:600 14px/22px var(--sans);color:var(--ink-muted)}
 
 /* Lista */
+#day{width:auto;margin:0}
+.dayf{display:flex;align-items:center;gap:var(--space-2);margin:0 0 0 auto}
+.dup{margin-top:var(--space-2);padding:var(--space-2) var(--space-4);border-left:3px solid var(--status-warning);background:var(--surface)}
+.dup div{margin-top:var(--space-1)}
+.when{margin-top:2px}
 .tabs{display:flex;gap:var(--space-2);flex-wrap:wrap;margin-bottom:var(--space-4)}
 .inc{border-top:1px solid var(--rule);padding:var(--space-4) 0}
 .inc:first-of-type{border-top:0;padding-top:0}
@@ -177,7 +182,8 @@ summary{cursor:pointer;font:600 14px/22px var(--sans);color:var(--ink-muted)}
     <button type="button" class="ghost chip" data-t="No puedo iniciar sesión">No puedo entrar</button>
     <button type="button" class="ghost chip" data-t="Error al guardar o enviar">Da error</button></div>
    <label for="t" class="label muted" style="margin-top:var(--space-2)">Escríbelo con tus palabras</label>
-   <input type="text" id="t" maxlength="200" required placeholder="Ej.: No puedo entrar al sistema de pagos"></div>
+   <input type="text" id="t" maxlength="200" required placeholder="Ej.: No puedo entrar al sistema de pagos">
+   <div id="dup" class="dup small" role="status" hidden></div></div>
   <div class="step"><span class="label">2 · ¿A quién afecta? <span class="muted">(opcional)</span></span>
    <div class="opts" role="radiogroup" aria-label="Impacto">
     <label><input type="radio" name="imp" value="Solo a mí"><span>Solo a mí</span></label>
@@ -196,7 +202,9 @@ summary{cursor:pointer;font:600 14px/22px var(--sans);color:var(--ink-muted)}
   <div class="tabs" id="filters" role="group" aria-label="Filtro">
    <button class="ghost" data-f="pending" aria-pressed="true">Pendientes</button>
    <button class="ghost" data-f="resuelta" aria-pressed="false">Resueltas</button>
-   <button class="ghost" data-f="all" aria-pressed="false">Todas</button></div>
+   <button class="ghost" data-f="all" aria-pressed="false">Todas</button>
+   <label class="dayf label muted" for="day">Registradas el <input type="date" id="day"></label>
+   <button class="ghost chip" id="clear-day" hidden>Todas las fechas</button></div>
   <div id="list" aria-live="polite"></div></section>
 </main>
 <div id="toast" role="status" hidden></div>
@@ -208,6 +216,7 @@ const Q={urgent:'Toma la incidencia pendiente más urgente: llama a listar_incid
  first:'¿Qué atiendo primero? Revisa las incidencias pendientes y dime cuál y por qué, en dos líneas.',
  summary:'Dame un resumen breve del estado actual de las incidencias.'};
 let sid=null,items=[],filter='pending',busy=false,toastTimer=null;const inline={};
+try{if(localStorage.getItem('v')!=='3'){['sid','thread'].forEach(k=>localStorage.removeItem(k));localStorage.setItem('v','3')}}catch{}
 try{sid=localStorage.getItem('sid')}catch{}
 function el(tag,cls,txt){const e=document.createElement(tag);if(cls)e.className=cls;if(txt!=null)e.textContent=txt;return e}
 async function api(path,method,body){
@@ -243,7 +252,7 @@ function renderThread(){const out=$('agent');out.replaceChildren(...thread.flatM
  if(thread.length){out.append(suggest());out.scrollTop=out.scrollHeight}}
 
 function flashNew(before){const fresh=items.filter(i=>!before.has(i.id));if(!fresh.length)return;
- filter='pending';render();
+ filter='pending';day='';$('day').value='';render();
  fresh.forEach((i,k)=>{const n=document.querySelector(`[data-id="${i.id}"]`);if(!n)return;n.classList.add('new');
   if(k===0)n.scrollIntoView({block:'center'});setTimeout(()=>n.classList.remove('new'),5000)})}
 /* Pregunta al agente. En el panel principal añade un turno al hilo; en una tarjeta pinta solo la respuesta.
@@ -272,24 +281,52 @@ document.querySelectorAll('.tile[data-q]').forEach(b=>b.onclick=()=>ask(Q[b.data
 $('chat').onsubmit=e=>{e.preventDefault();const q=$('m').value.trim();if(!q)return;$('m').value='';ask(q,$('agent'))};
 
 /* Lista priorizada */
+/* Fechas: «¿ya lo registré?» se responde de un vistazo */
+const DTF=new Intl.DateTimeFormat('es',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
+let day='';
+function ago(ts){const s=Math.max(0,Date.now()/1000-ts);if(s<90)return'hace un momento';const m=Math.round(s/60);
+ if(m<60)return`hace ${m} min`;const h=Math.round(m/60);if(h<24)return`hace ${h} h`;const d=Math.round(h/24);
+ return d===1?'ayer':`hace ${d} días`}
+const localDay=ts=>new Date(ts*1000).toLocaleDateString('en-CA');
+
 function render(){
- const pend=items.filter(i=>i.status!=='resuelta'),done=items.filter(i=>i.status==='resuelta');
- const cnt={pending:pend.length,resuelta:done.length,all:items.length},name={pending:'Pendientes',resuelta:'Resueltas',all:'Todas'};
+ const base=items.filter(i=>!day||localDay(i.created_at)===day);
+ const pend=base.filter(i=>i.status!=='resuelta'),done=base.filter(i=>i.status==='resuelta');
+ const cnt={pending:pend.length,resuelta:done.length,all:base.length},name={pending:'Pendientes',resuelta:'Resueltas',all:'Todas'};
  document.querySelectorAll('#filters [data-f]').forEach(b=>{b.setAttribute('aria-pressed',b.dataset.f===filter);
   b.textContent=`${name[b.dataset.f]} ${cnt[b.dataset.f]}`});
+ $('clear-day').hidden=!day;
  const by=(a,b)=>(RANK[a.severity]??4)-(RANK[b.severity]??4)||b.created_at-a.created_at;
- const vis=(filter==='pending'?pend:filter==='resuelta'?done:items).slice().sort(by);
- const top=filter==='pending'&&vis[0]?vis[0].id:null;
+ const vis=(filter==='pending'?pend:filter==='resuelta'?done:base).slice().sort(by);
+ const top=filter==='pending'&&!day&&vis[0]?vis[0].id:null;
  let nodes=vis.map(i=>card(i,i.id===top));
  if(!nodes.length){const e=el('div','empty');
-  e.append(el('p',null,filter==='pending'?'Todo al día. No hay nada pendiente.':'Nada por aquí todavía.'));
-  const b=el('button',null,'Reportar un problema');b.onclick=openReport;e.append(b);nodes=[e]}
+  e.append(el('p',null,day?'No hay nada registrado ese día.':filter==='pending'?'Todo al día. No hay nada pendiente.':'Nada por aquí todavía.'));
+  if(!day){const b=el('button',null,'Reportar un problema');b.onclick=openReport;e.append(b)}nodes=[e]}
  $('list').replaceChildren(...nodes)}
+$('day').addEventListener('input',()=>{day=$('day').value;render()});
+$('clear-day').onclick=()=>{day='';$('day').value='';render()};
+
+/* Aviso de duplicados mientras se escribe un reporte */
+const STOP=new Set(['de','la','el','los','las','un','una','en','que','con','por','para','del','al','y','o','no','se','su','mi','es','sin']);
+const words=s=>new Set(s.normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().split(/[^a-z0-9]+/).filter(w=>w.length>2&&!STOP.has(w)));
+function similar(title){const a=words(title);if(a.size<2)return[];
+ return items.map(i=>{const b=words(i.title);let n=0;a.forEach(w=>{if(b.has(w))n++});return{i,n,s:n/Math.min(a.size,b.size)}})
+  .filter(x=>x.n>=2&&x.s>=.6).sort((x,y)=>y.s-x.s).slice(0,2).map(x=>x.i)}
+function showDup(){const box=$('dup'),s=similar($('t').value);if(!s.length){box.hidden=true;return}
+ box.replaceChildren(el('strong',null,'¿Ya la registraste? Hay algo parecido:'),...s.map(i=>{
+  const r=el('div',null,`«${i.title}» · ${LABEL[i.status].toLowerCase()} · registrada ${ago(i.created_at)} `);
+  const b=el('button','ghost chip','Verla');b.type='button';b.onclick=()=>goTo(i);r.append(b);return r}));box.hidden=false}
+function goTo(i){$('new').hidden=true;filter=i.status==='resuelta'?'resuelta':'pending';day='';$('day').value='';render();
+ const n=document.querySelector(`[data-id="${i.id}"]`);
+ if(n){n.classList.add('new');n.scrollIntoView({block:'center'});setTimeout(()=>n.classList.remove('new'),5000)}}
+$('t').addEventListener('input',showDup);
 function card(i,isTop){
  const d=el('article','inc '+i.status+(isTop?' top':''));d.dataset.id=i.id;
  if(isTop)d.append(el('div','label hint','Sugerida // atender primero'));
  const r=el('div','row');r.append(el('span','sev label '+i.severity,SEV[i.severity]||i.severity),
   el('span','label muted',(i.category?i.category+' // ':'')+LABEL[i.status]));d.append(r,el('h3',null,i.title));
+const w=el('div','small muted when','Registrada el '+DTF.format(new Date(i.created_at*1000))+' · '+ago(i.created_at));d.append(w);
  if(i.summary)d.append(el('div','small',i.summary));
  if(i.next_steps&&i.next_steps.length&&i.status!=='resuelta'){const u=el('ul','steps');i.next_steps.forEach(s=>u.append(el('li',null,s)));d.append(u)}
  if(i.description){const x=el('details'),s=el('summary',null,'Ver descripción');x.append(s,el('div','small muted',i.description));d.append(x)}
@@ -309,14 +346,14 @@ document.querySelectorAll('#filters [data-f]').forEach(b=>b.onclick=()=>{filter=
 /* Reporte guiado */
 function openReport(){$('new').hidden=false;$('new').scrollIntoView({block:'start'});$('t').focus()}
 $('open-report').onclick=openReport;
-$('cancel-report').onclick=()=>{$('new').reset();$('ns').textContent='';$('new').hidden=true};
+$('cancel-report').onclick=()=>{$('dup').hidden=true;$('new').reset();$('ns').textContent='';$('new').hidden=true};
 document.querySelectorAll('#tpl [data-t]').forEach(b=>b.onclick=()=>{$('t').value=b.dataset.t;$('t').focus()});
 $('new').onsubmit=async e=>{e.preventDefault();if(busy)return;setBusy(true);
  $('ns').replaceChildren(thinking('El agente está revisando tu reporte…'));
  const imp=document.querySelector('input[name=imp]:checked');
  const desc=[imp?'Impacto: '+imp.value+'.':'',$('d').value.trim()].filter(Boolean).join('\n');
  try{const inc=await api('/api/incidents','POST',{title:$('t').value,description:desc});
-  $('new').reset();$('ns').textContent='';$('new').hidden=true;filter='pending';await load();
+  $('new').reset();$('dup').hidden=true;$('ns').textContent='';$('new').hidden=true;filter='pending';day='';$('day').value='';await load();
   const ok=inc.severity&&inc.severity!=='sin_clasificar';
   toast(ok?`Listo: la clasifiqué como ${SEV[inc.severity]||inc.severity}${inc.category?' ('+inc.category+')':''}${inc.status==='en_curso'?' y la puse en curso':''}.`
    :'Quedó registrada, pero el agente no pudo clasificarla ahora. Pídeselo desde su tarjeta.');

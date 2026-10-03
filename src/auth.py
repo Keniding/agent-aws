@@ -149,7 +149,7 @@ def _exchange(code, verifier, redirect_uri) -> dict:
         "redirect_uri": redirect_uri, "code_verifier": verifier}).encode()
     req = urllib.request.Request(f"{_base()}/oauth2/token", data=form,
                                  headers={"content-type": "application/x-www-form-urlencoded"})
-    with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310 - URL fija https
+    with urllib.request.urlopen(req, timeout=10) as resp:
         return json.load(resp)
 
 

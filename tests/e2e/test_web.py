@@ -218,3 +218,50 @@ def test_register_an_incident_by_chatting(page):
     card = card_of(page, "la impresora no imprime")
     card.wait_for()
     assert "new" in card.get_attribute("class")  # resaltada para que se vea qué cambió
+
+
+def test_each_incident_shows_when_it_was_registered(page):
+    mk(page, "Impresora rota")
+    page.reload()
+    card = card_of(page, "Impresora rota")
+    text = card.locator(".when").inner_text()
+    assert text.startswith("Registrada el ") and "hace un momento" in text
+
+
+def test_filter_by_day(page):
+    mk(page, "Impresora rota")
+    page.reload()
+    today = page.evaluate("new Date().toLocaleDateString('en-CA')")
+    page.fill("#day", today)
+    assert card_of(page, "Impresora rota").count() == 1
+    page.fill("#day", "2020-01-01")
+    page.get_by_text("No hay nada registrado ese día.").wait_for()
+    assert page.locator("article.inc").count() == 0
+    assert "pendientes 0" in page.locator("#filters").inner_text().lower()
+    page.get_by_role("button", name="Todas las fechas").click()
+    assert card_of(page, "Impresora rota").count() == 1 and not page.locator("#clear-day").is_visible()
+
+
+def test_warns_when_a_similar_incident_is_already_registered(page):
+    mk(page, "Pasarela de pagos caída")
+    page.reload()
+    page.locator("#open-report").click()
+    page.fill("#t", "la pasarela de pagos esta caida")
+    page.locator("#dup").wait_for(state="visible")
+    assert "Pasarela de pagos caída" in page.locator("#dup").inner_text()
+    assert "registrada hace un momento" in page.locator("#dup").inner_text()
+    page.fill("#t", "se fue la luz en la oficina")
+    page.locator("#dup").wait_for(state="hidden")
+    page.fill("#t", "pasarela de pagos caida")
+    page.get_by_role("button", name="Verla").click()
+    assert not page.locator("#new").is_visible()
+    page.wait_for_function("document.querySelector('article.inc.new')")  # lleva a la existente, resaltada
+
+
+def test_old_conversations_are_discarded_after_a_version_change(page):
+    page.evaluate("localStorage.removeItem('v');localStorage.setItem('sid','x'.repeat(40));"
+                  "localStorage.setItem('thread',JSON.stringify([{q:'vieja',reply:'antigua'}]))")
+    page.reload()
+    page.get_by_role("button", name="Resumen del día").first.wait_for()
+    assert page.locator("#agent .msg").count() == 0
+    assert page.evaluate("localStorage.getItem('sid')") is None and page.evaluate("localStorage.getItem('v')") == "3"

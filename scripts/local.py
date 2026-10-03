@@ -43,7 +43,7 @@ class FakeToolStream:
 class FakeRuntime:
     """Agente falso con el mismo protocolo que el harness: pide herramientas y luego responde."""
 
-    RANK = {"critica": 0, "alta": 1, "media": 2, "baja": 3}
+    RANK = {"critica": 0, "alta": 1, "media": 2, "baja": 3}  # noqa: RUF012 - constante de solo lectura
 
     def __init__(self):
         self.queue = {}  # sesión -> pasos pendientes: (herramienta, args) | función(resultado) | texto final

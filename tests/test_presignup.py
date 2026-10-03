@@ -38,5 +38,5 @@ def test_admin_created_users_pass_even_with_empty_list(monkeypatch):
 
 
 def test_external_providers_are_rejected(rules):
-    with pytest.raises(Exception):
+    with pytest.raises(Exception, match="no está autorizado"):
         presignup.handler(event("ana@empresa.com", "PreSignUp_ExternalProvider"), None)

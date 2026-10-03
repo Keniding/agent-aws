@@ -75,10 +75,14 @@ def harness_arn() -> str:
     return _arn
 
 
+def _when(i: dict) -> str:
+    return time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(int(i["created_at"])))
+
+
 def _short(i: dict) -> dict:
     return {"id": i["id"], "titulo": i["title"], "severidad": i.get("severity", "sin_clasificar"),
             "estado": i["status"], "resumen": i.get("summary", ""), "categoria": i.get("category", ""),
-            "proximos_pasos": i.get("next_steps", [])}
+            "proximos_pasos": i.get("next_steps", []), "registrada": _when(i)}
 
 
 def run_tool(name: str, args: dict) -> dict:
@@ -133,7 +137,7 @@ def _update(iid, expr, values, names=None):
         raise ValueError("la incidencia no existe") from None
 
 
-def invoke(session_id: str, messages: list, actor: str = None):
+def invoke(session_id: str, messages: list, actor: str | None = None):
     """Una vuelta al harness: devuelve (texto, llamadas a herramientas, motivo de parada)."""
     extra = {"actorId": actor} if actor else {}  # memoria a largo plazo aislada por usuario
     resp = _runtime.invoke_harness(harnessArn=harness_arn(), runtimeSessionId=session_id, **extra,
@@ -158,7 +162,7 @@ def invoke(session_id: str, messages: list, actor: str = None):
     return "".join(text).rsplit("</think>", 1)[-1].strip(), calls, stop
 
 
-def ask(session_id: str, text: str, actor: str = None):
+def ask(session_id: str, text: str, actor: str | None = None):
     """Bucle del agente: el harness decide, aquí se ejecutan sus herramientas. -> (respuesta, acciones)."""
     messages, actions, reply = [{"role": "user", "content": [{"text": text}]}], [], ""
     for _ in range(MAX_STEPS):
@@ -207,14 +211,15 @@ def create_incident(title: str, description: str) -> dict:
 def snapshot() -> str:
     """Estado real de lo pendiente: se adjunta a cada pregunta como fuente de verdad."""
     pend = [i for i in list_incidents() if i["status"] != "resuelta"]
-    rows = [f"- {i['id']} · {i.get('severity', 'sin_clasificar')} · {i['status']} · {i['title']}" for i in pend[:20]]
+    rows = [f"- {i['id']} · {i.get('severity', 'sin_clasificar')} · {i['status']} · {i['title']} · registrada {_when(i)}"
+            for i in pend[:20]]
     more = f"\n(y {len(pend) - 20} más)" if len(pend) > 20 else ""
     return (f"[Estado actual de las incidencias pendientes ({len(pend)}). Es la única fuente de verdad: "
             "ignora cualquier incidencia que recuerdes de conversaciones anteriores.]\n"
             + ("\n".join(rows) or "(ninguna)") + more)
 
 
-def chat(session_id: str, message: str, actor: str = None):
+def chat(session_id: str, message: str, actor: str | None = None):
     return ask(session_id, f"{message}\n\n{snapshot()}", actor)
 
 

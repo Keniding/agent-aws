@@ -114,3 +114,12 @@ Ojo: con Google habría que filtrar también por correo/dominio (el control actu
 El agente tiene la herramienta `crear_incidencia`: «Registra que la impresora no imprime» crea la incidencia al
 primer mensaje. El id lo genera el sistema (nunca se le pide al usuario) y el agente deduce título, severidad,
 categoría, resumen y pasos. La incidencia nueva aparece resaltada en la lista.
+
+## «¿Ya lo registré?»
+- **Fecha en cada incidencia:** «Registrada el 3 oct 2026, 03:15 · hace 6 min» (hora local del navegador).
+- **Filtro por día:** el campo «Registradas el» limita la lista a una fecha; «Todas las fechas» lo quita.
+- **Aviso de duplicados:** al escribir un reporte, si ya existe algo parecido (por palabras, ignorando acentos y
+  mayúsculas) se muestra con su estado y cuándo se registró, con un botón «Verla». No bloquea: se puede reportar igual.
+- El agente conoce la fecha de registro (`registrada`, en UTC) y puede responder «¿cuándo registré…?».
+- **Versión del almacenamiento del navegador** (`v`): al cambiar, la web descarta las conversaciones guardadas de
+  versiones anteriores, para que un historial antiguo no condicione al agente tras una actualización.

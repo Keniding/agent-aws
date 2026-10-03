@@ -83,7 +83,7 @@ def test_not_configured_fails_closed(secured, monkeypatch):
 
 
 def test_login_redirects_to_cognito_with_pkce(secured):
-    cookie, p, r = login(secured)
+    _cookie, p, r = login(secured)
     assert r["headers"]["location"].startswith("https://incidencias-123.auth.us-east-2.amazoncognito.com/oauth2/authorize?")
     assert p["client_id"] == CLIENT and p["response_type"] == "code" and p["code_challenge_method"] == "S256"
     assert p["redirect_uri"] == f"https://{HOST}/auth/callback" and len(p["state"]) >= 16 and p["nonce"]
