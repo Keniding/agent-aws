@@ -134,6 +134,8 @@ summary{cursor:pointer;font:600 14px/22px var(--sans);color:var(--ink-muted)}
  .themes{padding:var(--space-2) var(--space-4) 0;flex-wrap:wrap}}
 </style></head><body>
 <nav class="themes" aria-label="Tema">
+ <span id="who" class="small muted" style="align-self:center;margin-right:auto" hidden></span>
+ <a id="out" class="label" href="/auth/logout" hidden style="align-self:center;border:1px solid var(--rule);padding:12px 16px;color:var(--ink);text-decoration:none;border-radius:2px">Salir</a>
  <span class="label muted" style="align-self:center">Tema //</span>
  <button class="ghost" data-theme="auto" aria-pressed="true">Auto</button>
  <button class="ghost" data-theme="light" aria-pressed="false">Papel</button>
@@ -206,7 +208,8 @@ try{sid=localStorage.getItem('sid')}catch{}
 function el(tag,cls,txt){const e=document.createElement(tag);if(cls)e.className=cls;if(txt!=null)e.textContent=txt;return e}
 async function api(path,method,body){
  const r=await fetch(path,method?{method,headers:{'content-type':'application/json'},body:JSON.stringify(body)}:undefined);
- const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||('HTTP '+r.status));return j}
+ if(r.status===401){location.href="/";throw new Error("Tu sesión caducó")}
+ const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||("HTTP "+r.status));return j}
 function setTheme(t){document.documentElement.dataset.theme=t;try{localStorage.setItem('theme',t)}catch{}
  document.querySelectorAll('.themes [data-theme]').forEach(b=>b.setAttribute('aria-pressed',b.dataset.theme===t))}
 document.querySelectorAll('.themes [data-theme]').forEach(b=>b.onclick=()=>setTheme(b.dataset.theme));
@@ -292,5 +295,6 @@ $('new').onsubmit=async e=>{e.preventDefault();if(busy)return;setBusy(true);
    :'Quedó registrada, pero el agente no pudo clasificarla ahora. Pídeselo desde su tarjeta.');
   const n=document.querySelector(`[data-id="${inc.id}"]`);if(n){n.classList.add('new');n.scrollIntoView({block:'center'});setTimeout(()=>n.classList.remove('new'),5000)}}
  catch(x){$('ns').replaceChildren(el('span','err','No se pudo registrar: '+x.message))}finally{setBusy(false)}};
+api("/api/me").then(m=>{if(!m.local){$("who").textContent=m.name+(m.email?" · "+m.email:"");$("who").hidden=false;$("out").hidden=false}}).catch(()=>{});
 load();
 </script></body></html>

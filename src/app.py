@@ -8,6 +8,8 @@ import uuid
 
 import boto3
 
+import auth
+
 MAX_CHARS = int(os.environ.get("MAX_MESSAGE_CHARS", "2000"))
 HARNESS_NAME = os.environ["HARNESS_NAME"]
 TABLE = os.environ["TABLE_NAME"]
@@ -187,6 +189,23 @@ def _text(value, limit) -> str:
 def handler(event, _context):
     http = event["requestContext"]["http"]
     method, path = http["method"], event.get("rawPath", "/")
+    if path.startswith("/auth/"):
+        return auth.route(event, method, path)
+    if auth.DISABLED:
+        user = {"name": "Modo local", "local": True}
+    elif not auth.configured():  # fallo cerrado: sin Cognito configurado no se sirve nada
+        return auth.page(503, "Autenticación no configurada", "Falta configurar Amazon Cognito.")
+    else:
+        user = auth.session(event)
+        if user is None:
+            if method == "GET" and path == "/":
+                return auth.redirect("/auth/login")
+            return _json(401, {"error": "no autenticado"})
+        if method not in ("GET", "HEAD") and not auth.same_origin(event):
+            return _json(403, {"error": "origen no permitido"})
+    if method == "GET" and path == "/api/me":
+        return _json(200, {"name": user.get("name"), "email": user.get("email", ""),
+                           "local": bool(user.get("local"))})
     if method == "GET" and path == "/":
         return {"statusCode": 200, "headers": {"content-type": "text/html; charset=utf-8"},
                 "body": PAGE}

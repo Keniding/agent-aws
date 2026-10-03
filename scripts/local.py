@@ -96,7 +96,8 @@ def build_app():
     from moto import mock_aws
 
     os.environ.update(AWS_DEFAULT_REGION="us-east-1", AWS_ACCESS_KEY_ID="x",
-                      AWS_SECRET_ACCESS_KEY="x", HARNESS_NAME="local", TABLE_NAME="incidencias")
+                      AWS_SECRET_ACCESS_KEY="x", HARNESS_NAME="local", TABLE_NAME="incidencias",
+                      AUTH_DISABLED="1")
     mock = mock_aws()
     mock.start()
     boto3.client("dynamodb").create_table(

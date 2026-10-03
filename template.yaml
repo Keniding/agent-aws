@@ -104,6 +104,65 @@ Resources:
               - Effect: Allow
                 Action: [dynamodb:Scan, dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem]
                 Resource: !GetAtt IncidentsTable.Arn
+              - Effect: Allow  # autenticación: clave de firma de la sesión y descubrimiento del cliente
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref SessionSecret
+              - Effect: Allow
+                Action: cognito-idp:ListUserPoolClients
+                Resource: !GetAtt UserPool.Arn
+
+  # --- Autenticación: Amazon Cognito (solo AWS). Los usuarios los da de alta un administrador. ---
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub "${AWS::StackName}-usuarios"
+      UsernameAttributes: [email]
+      AutoVerifiedAttributes: [email]
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: true  # sin registro libre
+        InviteMessageTemplate:
+          EmailSubject: Acceso a Incidencias
+          EmailMessage: "Hola. Tu usuario es {username} y tu contraseña temporal es {####}. Entra y elige una nueva."
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 12
+          RequireLowercase: true
+          RequireUppercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+          TemporaryPasswordValidityDays: 7
+      MfaConfiguration: "OFF"
+      AccountRecoverySetting:
+        RecoveryMechanisms: [{Name: verified_email, Priority: 1}]
+  UserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain: !Sub "incidencias-${AWS::AccountId}"
+      UserPoolId: !Ref UserPool
+  UserPoolClient:  # público + PKCE: no hay secreto que guardar
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: incidencias-web
+      UserPoolId: !Ref UserPool
+      GenerateSecret: false
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthFlows: [code]
+      AllowedOAuthScopes: [openid, email, profile]
+      SupportedIdentityProviders: [COGNITO]
+      CallbackURLs: [!Sub "${Url.FunctionUrl}auth/callback"]
+      LogoutURLs: [!Sub "${Url.FunctionUrl}auth/signed-out"]
+      ExplicitAuthFlows: [ALLOW_USER_SRP_AUTH, ALLOW_REFRESH_TOKEN_AUTH]
+      PreventUserExistenceErrors: ENABLED
+      EnableTokenRevocation: true
+  SessionSecret:  # clave HMAC que firma la cookie de sesión
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: Clave de firma de la sesión de Incidencias
+      GenerateSecretString:
+        SecretStringTemplate: "{}"
+        GenerateStringKey: session_key
+        PasswordLength: 48
+        ExcludePunctuation: true
 
   Function:
     Type: AWS::Lambda::Function
@@ -115,13 +174,18 @@ Resources:
       MemorySize: 256
       Code: {S3Bucket: !Ref CodeBucket, S3Key: !Ref CodeKey}
       Environment:
-        Variables: {HARNESS_NAME: !Ref HarnessName, TABLE_NAME: !Ref IncidentsTable}
+        Variables:
+          HARNESS_NAME: !Ref HarnessName
+          TABLE_NAME: !Ref IncidentsTable
+          COGNITO_POOL_ID: !Ref UserPool
+          COGNITO_DOMAIN: !Ref UserPoolDomain
+          SESSION_SECRET_ARN: !Ref SessionSecret
 
   Url:
     Type: AWS::Lambda::Url
     Properties:
       TargetFunctionArn: !GetAtt Function.Arn
-      AuthType: NONE # público; add AWS_IAM or CloudFront+WAF before real use
+      AuthType: NONE # la URL es pública, pero la app exige sesión de Cognito (src/auth.py) y falla cerrada
   UrlPermission:
     Type: AWS::Lambda::Permission
     Properties:
@@ -140,3 +204,4 @@ Resources:
 Outputs:
   HarnessRoleArn: {Value: !GetAtt HarnessRole.Arn}
   WebUrl: {Value: !GetAtt Url.FunctionUrl}
+  UserPoolId: {Value: !Ref UserPool}

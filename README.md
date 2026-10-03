@@ -26,7 +26,7 @@ GitHub usan los últimos tags existentes al crear el repo.
 
 ## Puesta en marcha
 1. Rol IAM OIDC para GitHub (confía en `token.actions.githubusercontent.com`, repo `Keniding/agent-aws`) con
-   permisos sobre CloudFormation, IAM, Lambda, DynamoDB, S3 y `bedrock-agentcore:*`.
+   permisos sobre CloudFormation, IAM, Lambda, DynamoDB, S3, Cognito, Secrets Manager y `bedrock-agentcore:*`.
 2. Modelo: por defecto `nvidia.nemotron-nano-9b-v2` vía Bedrock Mantle (`chat_completions`), el mismo que usa el playground y que no requiere suscripción de Marketplace. Para otro, variables `MODEL_ID` y `API_FORMAT`.
 3. GitHub → Settings: secret `AWS_ROLE_ARN`; variables `AWS_REGION` y `MODEL_ID`.
 4. Push a `main` (o ejecutar `deploy` a mano): sube el zip, despliega `template.yaml`, crea/actualiza el
@@ -52,7 +52,7 @@ fallback local.
 ## Pendiente de validar
 - Validado contra AWS real (us-east-2, 2026-10-03): despliegue, harness, clasificación y chat. La política del rol del harness es un subconjunto de la que crea la consola.
   servicio de boto3 y la política del rol del harness es un punto de partida (ver *harness-security*).
-- La URL es pública (`AuthType NONE`) y cualquiera puede crear incidencias y gastar tokens: antes de uso
+- Autenticación hecha (ver abajo). Pendiente para uso real: MFA, WAF y límites de uso por usuario. Antes de uso
   real, añade autenticación (Cognito/IAM), WAF y límites.
 - La lista usa `Scan` (válido para volúmenes pequeños); para muchos datos, añade un índice por estado/fecha.
 
@@ -67,3 +67,24 @@ fallback local.
   **deshacer** desde el aviso.
 - Lo que hizo el agente se muestra en español («✓ Revisó las incidencias», «↻ … (reintentó)»), no como nombres
   de herramientas, y tras cada respuesta hay siguientes pasos sugeridos.
+
+## Autenticación (solo AWS: Amazon Cognito)
+La URL de la Function URL sigue siendo pública, pero **la app no sirve nada sin sesión** (`src/auth.py`):
+`/` redirige al login de Cognito y la API responde `401`. Si Cognito no está configurado responde `503`
+(falla cerrada). Sin dependencias ni servicios fuera de AWS.
+
+- **Flujo:** código de autorización + PKCE con un cliente público; `state` y `nonce` en una cookie firmada de
+  10 min; se validan emisor, audiencia, `token_use`, nonce y caducidad. La sesión es una cookie
+  `__Host-session` firmada con HMAC (clave generada en Secrets Manager), `HttpOnly`, `Secure`, `SameSite=Lax`,
+  8 h (`SESSION_HOURS`). Las escrituras también comprueban `Origin` contra CSRF.
+- **Sin registro libre:** solo un administrador da de alta usuarios (contraseña mínima de 12).
+- **Salir** cierra la sesión de la app y la de Cognito.
+- **Dar de alta a alguien:**
+  ```
+  POOL=$(aws cloudformation describe-stacks --stack-name incidencias --query "Stacks[0].Outputs[?OutputKey=='UserPoolId'].OutputValue" --output text)
+  aws cognito-idp admin-create-user --user-pool-id $POOL --username persona@empresa.com \
+    --user-attributes Name=email,Value=persona@empresa.com Name=email_verified,Value=true
+  ```
+  Cognito le envía un correo con una contraseña temporal. Para quitar acceso: `admin-delete-user` o `admin-disable-user`.
+- **Local y pruebas:** `AUTH_DISABLED=1` (lo fijan `scripts/local.py` y `tests/conftest.py`); nunca se define en AWS.
+- Validado contra Cognito real: login, sesión, agente tras el login, salida y reentrada pidiendo credenciales.
