@@ -1,7 +1,8 @@
 name: deploy
 on:
-  push:
-    branches: [main]
+  # Solo manual (Actions -> deploy -> Run workflow). Para desplegar al hacer push a main, añade:
+  #   push: {branches: [main]}
+  # cuando AWS_ROLE_ARN, AWS_REGION y ALLOWED_SIGNUPS estén configurados.
   workflow_dispatch:
 concurrency: deploy
 permissions:

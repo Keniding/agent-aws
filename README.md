@@ -29,7 +29,7 @@ GitHub usan los últimos tags existentes al crear el repo.
    permisos sobre CloudFormation, IAM, Lambda, DynamoDB, S3, Cognito, Secrets Manager y `bedrock-agentcore:*`.
 2. Modelo: por defecto `nvidia.nemotron-nano-9b-v2` vía Bedrock Mantle (`chat_completions`), el mismo que usa el playground y que no requiere suscripción de Marketplace. Para otro, variables `MODEL_ID` y `API_FORMAT`.
 3. GitHub → Settings: secret `AWS_ROLE_ARN`; variables `AWS_REGION` y `MODEL_ID`.
-4. Push a `main` (o ejecutar `deploy` a mano): sube el zip, despliega `template.yaml`, crea/actualiza el
+4. Ejecutar `deploy` a mano (Actions → deploy → Run workflow; el push a `main` no despliega hasta que lo actives): sube el zip, despliega `template.yaml`, crea/actualiza el
    harness e imprime la URL. `ci.yml` valida ramas y PRs; `destroy.yml` (manual) lo borra todo.
 
 ## Pruebas y ejecución local
