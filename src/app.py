@@ -53,7 +53,8 @@ def ask(session_id: str, text: str) -> str:
         delta = event.get("contentBlockDelta", {}).get("delta", {})
         if "text" in delta:
             out.append(delta["text"])
-    return "".join(out)
+    # Nemotron emite su razonamiento antes de </think>: solo interesa la respuesta final.
+    return "".join(out).rsplit("</think>", 1)[-1].strip()
 
 
 def parse_triage(text: str) -> dict:

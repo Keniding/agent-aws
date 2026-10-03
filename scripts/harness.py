@@ -1,7 +1,8 @@
 """Create/update (or delete) the AgentCore harness. Idempotent.
 
 Usage: uv run scripts/harness.py up|down
-Env:   HARNESS_NAME, HARNESS_ROLE_ARN, MODEL_ID (up only)
+Env:   HARNESS_NAME, HARNESS_ROLE_ARN (up only); MODEL_ID, API_FORMAT optional
+       (default: nvidia.nemotron-nano-9b-v2 via Bedrock Mantle, chat_completions)
 """
 
 import os
@@ -36,7 +37,10 @@ def wait(harness_id, done):
 def up():
     spec = {
         "executionRoleArn": os.environ["HARNESS_ROLE_ARN"],
-        "model": {"bedrockModelConfig": {"modelId": os.environ["MODEL_ID"]}},
+        "model": {"bedrockModelConfig": {
+            "modelId": os.environ.get("MODEL_ID") or "nvidia.nemotron-nano-9b-v2",
+            "apiFormat": os.environ.get("API_FORMAT") or "chat_completions",
+        }},
         "systemPrompt": [{"text": "Eres el asistente de un sistema de incidencias de TI. Clasificas severidad, propones próximos pasos y respondes dudas sobre las incidencias abiertas que se te indiquen. Sé breve y concreto; responde en español."}],
         "maxIterations": 10,
         "timeoutSeconds": 100,

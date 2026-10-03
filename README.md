@@ -27,7 +27,7 @@ GitHub usan los últimos tags existentes al crear el repo.
 ## Puesta en marcha
 1. Rol IAM OIDC para GitHub (confía en `token.actions.githubusercontent.com`, repo `Keniding/agent-aws`) con
    permisos sobre CloudFormation, IAM, Lambda, DynamoDB, S3 y `bedrock-agentcore:*`.
-2. Acceso al modelo en Bedrock y un `MODEL_ID` válido (`aws bedrock list-inference-profiles`).
+2. Modelo: por defecto `nvidia.nemotron-nano-9b-v2` vía Bedrock Mantle (`chat_completions`), el mismo que usa el playground y que no requiere suscripción de Marketplace. Para otro, variables `MODEL_ID` y `API_FORMAT`.
 3. GitHub → Settings: secret `AWS_ROLE_ARN`; variables `AWS_REGION` y `MODEL_ID`.
 4. Push a `main` (o ejecutar `deploy` a mano): sube el zip, despliega `template.yaml`, crea/actualiza el
    harness e imprime la URL. `ci.yml` valida ramas y PRs; `destroy.yml` (manual) lo borra todo.
@@ -50,7 +50,7 @@ rótulos `//`, esquinas rectas, sin sombras y cuadrícula milimétrica. Temas Pa
 fallback local.
 
 ## Pendiente de validar
-- Sin acceso a los docs de AWS ni a una cuenta desde el sandbox: la forma de la API sale del modelo de
+- Validado contra AWS real (us-east-2, 2026-10-03): despliegue, harness, clasificación y chat. La política del rol del harness es un subconjunto de la que crea la consola.
   servicio de boto3 y la política del rol del harness es un punto de partida (ver *harness-security*).
 - La URL es pública (`AuthType NONE`) y cualquiera puede crear incidencias y gastar tokens: antes de uso
   real, añade autenticación (Cognito/IAM), WAF y límites.
